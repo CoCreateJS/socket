@@ -1,3 +1,10 @@
+# [1.31.0](https://github.com/CoCreate-app/CoCreate-socket-server/compare/v1.30.0...v1.31.0) (2025-04-30)
+
+
+### Features
+
+* if data.endpoint emit "endpoint" ([93c650d](https://github.com/CoCreate-app/CoCreate-socket-server/commit/93c650d90556771676a87ff4c4a9e7d493c72c25))
+
 # [1.30.0](https://github.com/CoCreate-app/CoCreate-socket-server/compare/v1.29.5...v1.30.0) (2024-11-04)
 
 
