@@ -36,12 +36,14 @@ export class SocketServer extends EventEmitter {
         
         // Exclude parent tracking property bounds
         this.serverId = uid.generate(12);
+        
+        // Use ES6 Maps for O(1) lookups and zero-allocation updates
         this.organizations = new Map();
         this.clients = new Map();
         this.sockets = new Map();
         this.users = new Map();
 
-        // Extract isolated helper properties directly from the server instance (no fallback imports needed)
+        // Extract isolated helper properties directly from the server instance
         this.authenticate = server?.authenticate;
         this.authorize = server?.authorize;
 
@@ -49,7 +51,7 @@ export class SocketServer extends EventEmitter {
 
         this.wss = new WebSocketServer({ noServer: true });
 
-        // We use bound prototype methods instead of inline closures to prevent scope leakage of 'server'
+        // We use bound prototype methods instead of inline closures to prevent scope leakage
         this.wss.on("headers", this._handleHeaders.bind(this));
         this.wss.on("error", this._handleWssError.bind(this));
 
@@ -61,6 +63,32 @@ export class SocketServer extends EventEmitter {
                 server.http.on("upgrade", this._upgradeWs.bind(this));
             }
         }
+
+        // Heartbeat interval to clean up silent/dropped connections safely
+        this.heartbeatInterval = setInterval(() => {
+            this.sockets.forEach((socket) => {
+                if (socket.isAlive === false) {
+                    socket.terminate();
+                    return;
+                }
+                socket.isAlive = false;
+                try {
+                    if (socket.readyState === ws.OPEN) {
+                        socket.ping();
+                    } else {
+                        socket.terminate();
+                    }
+                } catch (err) {
+                    console.error("[@cocreate/socket-server] Error pinging socket:", err);
+                    socket.terminate();
+                }
+            });
+        }, 30000);
+    }
+
+    close() {
+        clearInterval(this.heartbeatInterval);
+        this.wss.close();
     }
 
     _handleHeaders(headers, request) {
@@ -80,14 +108,19 @@ export class SocketServer extends EventEmitter {
     }
 
     static async init(server) {
-        // Return isolated instance without writing wsManager onto the server object here
         return new SocketServer(server);
     }
 
     upgrade(request, socket, head, protocol) {
         const self = this;
-        let organization_id = request.url.split("/");
-        organization_id = organization_id[organization_id.length - 1];
+        
+        const host = request.headers.host || "localhost";
+        const parsedUrl = new URL(request.url, `http://${host}`);
+        
+        // .filter(Boolean) removes empty strings, protecting against trailing slashes!
+        const paths = parsedUrl.pathname.split("/").filter(Boolean);
+        // Grab the FIRST segment as the organization_id (e.g., /org_123/namespace/room -> org_123)
+        const organization_id = paths[0];
 
         this.wss.handleUpgrade(request, socket, head, async function (socket) {
             if (organization_id) {
@@ -98,19 +131,21 @@ export class SocketServer extends EventEmitter {
                     errors.serverStorage = organization.serverStorage;
                     errors.organizationBalance = organization.organizationBalance;
                     errors.error = organization.error;
-                    return socket.send(
-                        JSON.stringify({
-                            method: "Access Denied",
-                            error: errors
-                        })
-                    );
+                    return self._safeSend(socket, {
+                        method: "Access Denied",
+                        error: errors
+                    });
                 }
 
-                let options = {};
+                // 1. Extract Query Parameters as the baseline options
+                let options = Object.fromEntries(parsedUrl.searchParams.entries());
+
+                // 2. Safely merge and override with secure protocol headers if they exist
                 try {
                     const protocolHeader = request.headers["sec-websocket-protocol"];
                     if (protocolHeader) {
-                        options = JSON.parse(decodeURIComponent(protocolHeader));
+                        const headerOptions = JSON.parse(decodeURIComponent(protocolHeader));
+                        options = { ...options, ...headerOptions };
                     }
                 } catch (err) {
                     console.error("[@cocreate/socket-server] Error parsing socket options:", err);
@@ -136,26 +171,6 @@ export class SocketServer extends EventEmitter {
                     !organization ||
                     (organization && organization.status !== false)
                 ) {
-                    let data = {
-                        socket,
-                        method: "object.read",
-                        host: socket.host,
-                        array: "message_log",
-                        $filter: {
-                            sort: [{ key: "_id", direction: "desc" }]
-                        },
-                        sync: true,
-                        organization_id
-                    };
-
-                    if (options.lastSynced)
-                        data.$filter.query = {
-                            _id: { $gt: options.lastSynced }
-                        };
-                    else data.$filter.limit = 1;
-
-                    self.emit("object.read", data);
-
                     const authService = self.authenticate;
                     if (authService) {
                         const { user_id, expires } =
@@ -187,18 +202,22 @@ export class SocketServer extends EventEmitter {
                     } else self.onWebSocket(socket);
                 }
             } else {
-                socket.send(
-                    JSON.stringify({
-                        method: "Access Denied",
-                        error: "An organization_id is required"
-                    })
-                );
+                self._safeSend(socket, {
+                    method: "Access Denied",
+                    error: "An organization_id is required"
+                });
             }
         });
     }
 
     onWebSocket(socket) {
         const self = this;
+        
+        socket.isAlive = true;
+        socket.on("pong", () => {
+            socket.isAlive = true;
+        });
+
         this.add(socket);
 
         socket.on("message", async (message) => {
@@ -213,9 +232,7 @@ export class SocketServer extends EventEmitter {
             self.delete(socket);
         });
 
-        socket.send(
-            JSON.stringify({ method: "connect", connectedKey: socket.pathname })
-        );
+        this._safeSend(socket, { method: "connect", connectedKey: socket.pathname });
     }
 
     add(socket) {
@@ -225,7 +242,8 @@ export class SocketServer extends EventEmitter {
         if (!organization) {
             organization = {
                 status: true,
-                clients: {}
+                clients: new Map(), 
+                debounce: null
             };
 
             this.organizations.set(organization_id, organization);
@@ -245,21 +263,21 @@ export class SocketServer extends EventEmitter {
                 url: socket.socketUrl,
                 organization_id
             });
-        } else clearTimeout(organization.debounce);
+        } else {
+            clearTimeout(organization.debounce);
+        }
 
         if (!this.clients.has(socket.clientId)) {
-            this.clients.set(socket.clientId, {});
+            this.clients.set(socket.clientId, new Map());
+        }
 
-            if (!organization.clients)
-                organization.clients = { [socket.clientId]: {} };
-            else organization.clients[socket.clientId] = {};
+        if (!organization.clients.has(socket.clientId)) {
+            organization.clients.set(socket.clientId, new Map());
         }
 
         this.sockets.set(socket.id, socket);
-        this.clients.get(socket.clientId)[socket.id] = socket;
-        if (!organization.clients[socket.clientId])
-            organization.clients[socket.clientId] = { [socket.id]: socket };
-        else organization.clients[socket.clientId][socket.id] = socket;
+        this.clients.get(socket.clientId).set(socket.id, socket);
+        organization.clients.get(socket.clientId).set(socket.id, socket);
 
         if (socket.user_id) {
             this.emit("userStatus", {
@@ -270,69 +288,89 @@ export class SocketServer extends EventEmitter {
                 userStatus: "on",
                 organization_id
             });
-            let user = this.users.get(socket.user_id);
+            
+            let userSession = this.users.get(socket.user_id);
 
-            if (!user) {
-                this.users.set(socket.user_id, { [socket.id]: socket });
+            if (!userSession) {
+                userSession = { sockets: new Map(), debounce: null };
+                this.users.set(socket.user_id, userSession);
             } else {
-                clearTimeout(user);
-                user[socket.id] = socket;
+                clearTimeout(userSession.debounce);
             }
+            userSession.sockets.set(socket.id, socket);
         }
     }
 
     get(data) {
         try {
-            let sockets = [],
-                clients;
-            let organization = this.organizations.get(data.organization_id);
-            if (organization) clients = organization.clients;
-            else return [];
+            const sockets = [];
+            const organization = this.organizations.get(data.organization_id);
+            if (!organization || !organization.clients) return [];
+
+            const clientsMap = organization.clients;
 
             if (data.broadcast !== false) {
-                for (let client of Object.keys(clients)) {
-                    if (data.broadcastSender === false && client === data.clientId)
+                for (const [clientId, clientSocketsMap] of clientsMap.entries()) {
+                    if (data.broadcastSender === false && clientId === data.clientId) {
                         continue;
+                    }
 
                     if (data.broadcastClient) {
-                        if (
-                            client === data.clientId &&
-                            clients[client][data.socket.id]
-                        )
-                            sockets.push(clients[client][data.socket.id]);
-                        else sockets.push(Object.values(clients[client])[0]);
-                    } else
-                        sockets.push(...Array.from(Object.values(clients[client])));
+                        if (clientId === data.clientId) {
+                            const activeSocket = clientSocketsMap.get(data.socket?.id);
+                            if (activeSocket) sockets.push(activeSocket);
+                        } else {
+                            for (const socketInstance of clientSocketsMap.values()) {
+                                sockets.push(socketInstance);
+                                break;
+                            }
+                        }
+                    } else {
+                        for (const socketInstance of clientSocketsMap.values()) {
+                            sockets.push(socketInstance);
+                        }
+                    }
                 }
             } else if (data.broadcastSender !== false) {
-                if (clients[data.clientId]) {
-                    if (clients[data.clientId][data.socket.id])
-                        sockets.push(clients[data.clientId][data.socket.id]);
-                    else sockets.push(Object.values(clients[data.clientId])[0]);
-                } else sockets.push(data.socket);
+                const clientSocketsMap = clientsMap.get(data.clientId);
+                if (clientSocketsMap) {
+                    const activeSocket = clientSocketsMap.get(data.socket?.id);
+                    if (activeSocket) {
+                        sockets.push(activeSocket);
+                    } else {
+                        for (const socketInstance of clientSocketsMap.values()) {
+                            sockets.push(socketInstance);
+                            break;
+                        }
+                    }
+                } else if (data.socket) {
+                    sockets.push(data.socket);
+                }
             }
             return sockets;
         } catch (error) {
             console.error("[SocketServer] Error in get method:", error);
+            return [];
         }
     }
 
     delete(socket) {
-        let organization_id = socket.organization_id;
-        if (this.organizations.has(organization_id)) {
-            let clients = this.organizations.get(organization_id);
-            if (clients && clients.clients) {
-                clients = clients.clients;
-            }
-            if (clients && clients[socket.clientId]) {
-                const client = clients[socket.clientId];
-                delete client[socket.id];
+        const organization_id = socket.organization_id;
+        const clientId = socket.clientId;
+        const socketId = socket.id;
 
-                if (!Object.keys(client).length)
-                    delete clients[socket.clientId];
+        const organization = this.organizations.get(organization_id);
+        if (organization && organization.clients) {
+            const clientSocketsMap = organization.clients.get(clientId);
+            
+            if (clientSocketsMap) {
+                clientSocketsMap.delete(socketId);
 
-                if (!Object.keys(clients).length) {
-                    this.organizations.delete(socket.organization_id);
+                if (clientSocketsMap.size === 0) {
+                    organization.clients.delete(clientId);
+                }
+
+                if (organization.clients.size === 0) {
                     this.emit("object.update", {
                         method: "object.update",
                         host: socket.host,
@@ -348,61 +386,52 @@ export class SocketServer extends EventEmitter {
                         url: socket.socketUrl,
                         organization_id
                     });
+
+                    clearTimeout(organization.debounce);
+                    organization.debounce = setTimeout(() => {
+                        const currentOrg = this.organizations.get(organization_id);
+                        if (currentOrg && currentOrg.clients.size === 0) {
+                            this.organizations.delete(organization_id);
+                        }
+                    }, 10000);
                 }
             }
         }
 
-        if (this.clients.has(socket.clientId)) {
-            const client = this.clients.get(socket.clientId);
-            delete client[socket.id];
-
-            if (!Object.keys(client).length)
-                this.clients.delete(socket.clientId);
+        const globalClientMap = this.clients.get(clientId);
+        if (globalClientMap) {
+            globalClientMap.delete(socketId);
+            if (globalClientMap.size === 0) {
+                this.clients.delete(clientId);
+            }
         }
 
-        if (this.clients.size === 0) {
-            let organization = this.organizations.get(socket.organization_id);
-            let debounceTimer;
-            if (organization) debounceTimer = organization.debounce;
+        this.sockets.delete(socketId);
 
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                this.organizations.delete(socket.organization_id);
-            }, 10000);
+        if (socket.user_id) {
+            const userSession = this.users.get(socket.user_id);
+            if (userSession) {
+                userSession.sockets.delete(socketId);
 
-            if (!organization)
-                this.organizations.set(socket.organization_id, {
-                    debounce: debounceTimer
-                });
-            else organization.debounce = debounceTimer;
-
-            this.sockets.delete(socket.id);
-
-            if (socket.user_id) {
-                let sockets = this.users.get(socket.user_id);
-                if (sockets) {
-                    delete sockets[socket.id];
-                    if (!Object.keys(sockets).length) {
-                        let userDebounceTimer = sockets;
-
-                        clearTimeout(userDebounceTimer);
-                        userDebounceTimer = setTimeout(() => {
-                            this.users.delete(socket.user_id);
-                            this.emit("userStatus", {
-                                socket,
-                                user_id: socket.user_id,
-                                host: socket.host,
-                                clientId: socket.clientId,
-                                userStatus: "off",
-                                organization_id
-                            });
-                        }, 10000);
-
-                        this.users.set(socket.user_id, userDebounceTimer);
-                    }
+                if (userSession.sockets.size === 0) {
+                    clearTimeout(userSession.debounce);
+                    userSession.debounce = setTimeout(() => {
+                        this.users.delete(socket.user_id);
+                        this.emit("userStatus", {
+                            socket,
+                            user_id: socket.user_id,
+                            host: socket.host,
+                            clientId: socket.clientId,
+                            userStatus: "off",
+                            organization_id
+                        });
+                    }, 10000);
                 }
             }
         }
+
+        // Explicit cleanup of listeners to protect V8 GC memory allocation bounds
+        socket.removeAllListeners();
     }
 
     async onMessage(socket, message) {
@@ -413,11 +442,17 @@ export class SocketServer extends EventEmitter {
                 organization_id: socket.organization_id
             });
 
-            let data = JSON.parse(message);
+            let data;
+            try {
+                data = JSON.parse(message);
+            } catch (err) {
+                return this._safeSend(socket, { error: "Invalid JSON payload" });
+            }
+            
             if (data.method) this.Message(socket, data);
             else {
                 data.error = "method is required";
-                return socket.send(JSON.stringify(data));
+                return this._safeSend(socket, data);
             }
         } catch (e) {
             console.log(e);
@@ -432,7 +467,7 @@ export class SocketServer extends EventEmitter {
             if (organization && organization.organizationBalance == false) {
                 data.organizationBalance = false;
                 data.error = organization.error;
-                return socket.send(JSON.stringify(data));
+                return this._safeSend(socket, data);
             }
 
             if (
@@ -469,7 +504,7 @@ export class SocketServer extends EventEmitter {
                     ) {
                         data.organizationBalance = false;
                         data.error = organization.error;
-                        return socket.send(JSON.stringify(data));
+                        return this._safeSend(socket, data);
                     }
                 }
 
@@ -484,7 +519,7 @@ export class SocketServer extends EventEmitter {
                 if (authorized === false) {
                     delete data.socket;
                     data.error = "authorization failed";
-                    return socket.send(JSON.stringify(data));
+                    return this._safeSend(socket, data);
                 } else if (authorized.serverOrganization === false) {
                     organization.status = errors.status = false;
                     organization.serverOrganization = false;
@@ -518,38 +553,26 @@ export class SocketServer extends EventEmitter {
                     data.organizationBalance = organization.organizationBalance;
                     data.error = organization.error;
                     delete data.socket;
-                    return socket.send(JSON.stringify(data));
+                    return this._safeSend(socket, data);
                 }
 
                 if (authorized.authorized) data = authorized.authorized;
+            } // End of Authorization Block
 
-                if (data.endpoint) {
-                    this.emit("endpoint", data);
-                } else {
-                    let moduleName = data.method.split(".")[0];
-                    if (
-                        [
-                            "storage",
-                            "database",
-                            "array",
-                            "index",
-                            "object"
-                        ].includes(moduleName)
-                    ) {
-                        this.emit(data.method, data);
-                    } else if (
-                        data.method === "crdt" ||
-                        data.method === "cursor"
-                    ) {
-                        this.send(data);
-                    } else {
-                        this.emit(moduleName, data);
-                    }
-                }
+            // --- ROUTE TO ENDPOINTS / CRUD OPERATIONS ---
+            if (data.endpoint) {
+                this.emit("endpoint", data);
+            } else if (data.method === "crdt" || data.method === "cursor") {
+                this.send(data);
             } else {
                 let moduleName = data.method.split(".")[0];
-                this.emit(moduleName, data);
+                if (["storage", "database", "array", "index", "object"].includes(moduleName)) {
+                    this.emit(data.method, data);
+                } else {
+                    this.emit(moduleName, data);
+                }
             }
+
         } catch (e) {
             console.log(e);
         }
@@ -561,113 +584,133 @@ export class SocketServer extends EventEmitter {
 
         const authorizeService = this.authorize;
 
-        if (data.sync) {
-            if (!data.object || !data.object.length) return;
+        const sent = [];
 
-            for (let i = 0; i < data.object.length; i++) {
-                if (data.object[i].data) {
-                    data.object[i].data._id = data.object[i]._id;
-                    data.object[i].data.sync = true;
+        if (authorizeService && socket) {
+            const authorized = await authorizeService.check(data, socket.user_id);
+            if (authorized && authorized.authorized)
+                data = authorized.authorized;
+        }
 
-                    if (authorizeService) {
-                        const authorized = await authorizeService.check(
-                            data.object[i].data,
-                            socket.user_id
-                        );
-                        if (authorized && authorized.authorized)
-                            socket.send(JSON.stringify(authorized.authorized));
-                        else socket.send(JSON.stringify(data.object[i].data));
-                    } else {
-                        socket.send(JSON.stringify(data.object[i].data));
-                    }
-                } else console.log("server sync missing data");
-            }
-        } else {
-            const sent = [];
-
-            if (authorizeService && socket) {
-                const authorized = await authorizeService.check(data, socket.user_id);
-                if (authorized && authorized.authorized)
-                    data = authorized.authorized;
-            }
-
-            if (
-                socket &&
+        // --- POST-EXECUTION METADATA LOGGING ---
+        // Because this is in send(), the data has completed the module cycle.
+        if (
+                !data.error && // Only log successful operations
                 data.log !== false &&
                 data.log !== "false" &&
                 !data.method.endsWith(".read") &&
                 data.method !== "updateUserStatus" &&
                 data.method !== "userStatus" &&
-                data.method !== "signIn" &&
-                data.method !== "signUp"
+                data.method !== "crdt" && 
+                data.method !== "cursor"
             ) {
-                let moduleName = data.method.split(".");
-                if (
-                    [
-                        "storage",
-                        "database",
-                        "array",
-                        "index",
-                        "object"
-                    ].includes(moduleName[0]) &&
-                    ["delete"].includes(moduleName[1])
-                ) {
-                    let object = { url: socket.socketUrl, data: { ...data } };
-                    delete object.data.socket;
+                let logPayload = {
+                    method: data.method,
+                    organization_id: data.organization_id,
+                    user_id: (socket && socket.user_id) || data.user_id,
+                    timestamp: new Date().toISOString()
+                };
 
-                    this.emit("object.create", {
-                        method: "object.create",
-                        host: data.host,
-                        array: "message_log",
-                        object,
-                        organization_id: data.organization_id
-                    });
+                if (data.endpoint) logPayload.endpoint = data.endpoint;
+                if (data.array) logPayload.array = data.array;
+
+                if (data.object) {
+                    if (Array.isArray(data.object)) {
+                        const skeletonArray = [];
+                        for (const item of data.object) {
+                            if (item && item._id) skeletonArray.push({ _id: item._id });
+                        }
+                        if (skeletonArray.length > 0) logPayload.object = skeletonArray;
+                    } else if (data.object._id) {
+                        logPayload.object = { _id: data.object._id };
+                    }
                 }
+
+                this.emit("object.create", {
+                    method: "object.create",
+                    host: data.host || (socket && socket.host),
+                    array: "message_log",
+                    object: logPayload, 
+                    organization_id: data.organization_id
+                });
             }
 
             let sockets = this.get(data);
+            let cleanData = { ...data };
+            delete cleanData.socket;
+            
+            if (
+                cleanData.$filter &&
+                cleanData.$filter.query &&
+                cleanData.$filter.query._id &&
+                cleanData.$filter.query._id.$eq === "$user_id"
+            ) {
+                delete cleanData.$filter.query._id;
+            }
 
-            for (let i = 0; i < sockets.length; i++) {
-                if (!sockets[i]) continue;
+            const defaultPayloadStr = JSON.stringify(cleanData);
 
-                let Data;
+            for (const recipientSocket of sockets) {
+                if (!recipientSocket) continue;
+
+                let payloadStr = defaultPayloadStr;
+                let finalDataObj = cleanData;
+
                 if (authorizeService) {
-                    const authorized = await authorizeService.check(
-                        data,
-                        sockets[i].user_id
+                    const authResult = await authorizeService.check(
+                        cleanData,
+                        recipientSocket.user_id
                     );
-                    if (authorized && authorized.authorized) {
-                        Data = { ...authorized.authorized };
-                    } else {
-                        Data = { ...data };
+                    
+                    if (authResult === false) {
+                        continue;
                     }
-                } else {
-                    Data = { ...data };
+
+                    if (authResult !== true && authResult && authResult.authorized) {
+                        finalDataObj = { ...authResult.authorized };
+                        delete finalDataObj.socket;
+
+                        if (
+                            finalDataObj.$filter &&
+                            finalDataObj.$filter.query &&
+                            finalDataObj.$filter.query._id &&
+                            finalDataObj.$filter.query._id.$eq === "$user_id"
+                        ) {
+                            delete finalDataObj.$filter.query._id;
+                        }
+                        
+                        payloadStr = JSON.stringify(finalDataObj);
+                    }
                 }
 
-                if (
-                    Data.$filter &&
-                    Data.$filter.query &&
-                    Data.$filter.query._id &&
-                    Data.$filter.query._id.$eq === "$user_id"
-                )
-                    delete Data.$filter.query._id;
+                this._safeSend(recipientSocket, payloadStr);
 
-                delete Data.socket;
-                sockets[i].send(JSON.stringify(Data));
-
-                if (socket) {
-                    sent.push(socket.clientId);
+                if (recipientSocket.clientId) {
+                    sent.push(recipientSocket.clientId);
                 }
                 
                 this.emit("setBandwidth", {
                     type: "out",
-                    data: Data,
-                    organization_id: sockets[i].organization_id
+                    data: finalDataObj,
+                    organization_id: recipientSocket.organization_id
                 });
             }
 
-            this.emit("notification", { sent });
+        // Emit the clean payload so pluggable mesh drivers (like @cocreate/socket-mesh)
+        // can capture this event and broadcast it across server-to-server tunnels
+        this.emit("send", cleanData);
+        this.emit("notification", { sent });
+    }
+
+    // Helper to send payloads safely on valid connections without throwing frame failures
+    _safeSend(socket, payload) {
+        try {
+            if (socket && socket.readyState === ws.OPEN) {
+                const message = typeof payload === "string" ? payload : JSON.stringify(payload);
+                socket.send(message);
+            }
+        } catch (err) {
+            console.error("[@cocreate/socket-server] Error safely writing to socket:", err);
         }
     }
 }
