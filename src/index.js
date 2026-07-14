@@ -13,7 +13,6 @@
  *
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
- *
  ********************************************************************************/
 
 // Commercial Licensing Information:
@@ -34,41 +33,55 @@ import config from '@cocreate/config';
 export class SocketServer extends EventEmitter {
     constructor(server) {
         super();
-        this.server = server;
+        
+        // Exclude parent tracking property bounds
         this.serverId = uid.generate(12);
         this.organizations = new Map();
         this.clients = new Map();
         this.sockets = new Map();
         this.users = new Map();
 
+        // Extract isolated helper properties directly from the server instance (no fallback imports needed)
+        this.authenticate = server?.authenticate;
+        this.authorize = server?.authorize;
+
         config({ organization_id: { prompt: "Enter your organization_id: " } });
 
         this.wss = new WebSocketServer({ noServer: true });
 
-        this.wss.on("headers", (headers, request) => {
-            headers.push("Access-Control-Allow-Origin: *");
-        });
+        // We use bound prototype methods instead of inline closures to prevent scope leakage of 'server'
+        this.wss.on("headers", this._handleHeaders.bind(this));
+        this.wss.on("error", this._handleWssError.bind(this));
 
-        this.wss.on("error", (error) => {
-            console.error("[@cocreate/socket-server] WebSocketServer error:", error);
-        });
-
-        if (server.https) {
-            server.https.on("upgrade", (request, socket, head) =>
-                this.upgrade(request, socket, head, "wss")
-            );
-        }
-        if (server.http) {
-            server.http.on("upgrade", (request, socket, head) =>
-                this.upgrade(request, socket, head, "ws")
-            );
+        if (server) {
+            if (server.https) {
+                server.https.on("upgrade", this._upgradeWss.bind(this));
+            }
+            if (server.http) {
+                server.http.on("upgrade", this._upgradeWs.bind(this));
+            }
         }
     }
 
+    _handleHeaders(headers, request) {
+        headers.push("Access-Control-Allow-Origin: *");
+    }
+
+    _handleWssError(error) {
+        console.error("[@cocreate/socket-server] WebSocketServer error:", error);
+    }
+
+    _upgradeWss(request, socket, head) {
+        this.upgrade(request, socket, head, "wss");
+    }
+
+    _upgradeWs(request, socket, head) {
+        this.upgrade(request, socket, head, "ws");
+    }
+
     static async init(server) {
-        const instance = new SocketServer(server);
-        server.wsManager = instance;
-        return instance;
+        // Return isolated instance without writing wsManager onto the server object here
+        return new SocketServer(server);
     }
 
     upgrade(request, socket, head, protocol) {
@@ -143,7 +156,7 @@ export class SocketServer extends EventEmitter {
 
                     self.emit("object.read", data);
 
-                    const authService = self.server.authenticate || self.authenticate;
+                    const authService = self.authenticate;
                     if (authService) {
                         const { user_id, expires } =
                             await authService.decodeToken(
@@ -269,35 +282,39 @@ export class SocketServer extends EventEmitter {
     }
 
     get(data) {
-        let sockets = [],
-            clients;
-        let organization = this.organizations.get(data.organization_id);
-        if (organization) clients = organization.clients;
-        else return [];
+        try {
+            let sockets = [],
+                clients;
+            let organization = this.organizations.get(data.organization_id);
+            if (organization) clients = organization.clients;
+            else return [];
 
-        if (data.broadcast !== false) {
-            for (let client of Object.keys(clients)) {
-                if (data.broadcastSender === false && client === data.clientId)
-                    continue;
+            if (data.broadcast !== false) {
+                for (let client of Object.keys(clients)) {
+                    if (data.broadcastSender === false && client === data.clientId)
+                        continue;
 
-                if (data.broadcastClient) {
-                    if (
-                        client === data.clientId &&
-                        clients[client][data.socket.id]
-                    )
-                        sockets.push(clients[client][data.socket.id]);
-                    else sockets.push(Object.values(clients[client])[0]);
-                } else
-                    sockets.push(...Array.from(Object.values(clients[client])));
+                    if (data.broadcastClient) {
+                        if (
+                            client === data.clientId &&
+                            clients[client][data.socket.id]
+                        )
+                            sockets.push(clients[client][data.socket.id]);
+                        else sockets.push(Object.values(clients[client])[0]);
+                    } else
+                        sockets.push(...Array.from(Object.values(clients[client])));
+                }
+            } else if (data.broadcastSender !== false) {
+                if (clients[data.clientId]) {
+                    if (clients[data.clientId][data.socket.id])
+                        sockets.push(clients[data.clientId][data.socket.id]);
+                    else sockets.push(Object.values(clients[data.clientId])[0]);
+                } else sockets.push(data.socket);
             }
-        } else if (data.broadcastSender !== false) {
-            if (clients[data.clientId]) {
-                if (clients[data.clientId][data.socket.id])
-                    sockets.push(clients[data.clientId][data.socket.id]);
-                else sockets.push(Object.values(clients[data.clientId])[0]);
-            } else sockets.push(data.socket);
+            return sockets;
+        } catch (error) {
+            console.error("[SocketServer] Error in get method:", error);
         }
-        return sockets;
     }
 
     delete(socket) {
@@ -307,7 +324,6 @@ export class SocketServer extends EventEmitter {
             if (clients && clients.clients) {
                 clients = clients.clients;
             }
-            // Check if the client exists
             if (clients && clients[socket.clientId]) {
                 const client = clients[socket.clientId];
                 delete client[socket.id];
@@ -444,7 +460,7 @@ export class SocketServer extends EventEmitter {
                 return;
             }
 
-            const authorizeService = this.server.authorize || this.authorize;
+            const authorizeService = this.authorize;
             if (authorizeService) {
                 if (!this.sockets.has(socket.id)) {
                     if (
@@ -531,7 +547,6 @@ export class SocketServer extends EventEmitter {
                     }
                 }
             } else {
-                // Pass directly to emitters if authorizer is not registered
                 let moduleName = data.method.split(".")[0];
                 this.emit(moduleName, data);
             }
@@ -541,11 +556,10 @@ export class SocketServer extends EventEmitter {
     }
 
     async send(data) {
-        // Extract socket and safeguard circular references
         const socket = data.socket;
         delete data.wsManager;
 
-        const authorizeService = this.server.authorize || this.authorize;
+        const authorizeService = this.authorize;
 
         if (data.sync) {
             if (!data.object || !data.object.length) return;
@@ -655,20 +669,6 @@ export class SocketServer extends EventEmitter {
 
             this.emit("notification", { sent });
         }
-    }
-
-    getConfigFromUrl(pathname) {
-        const path = pathname.split("/");
-        if (path[2]) {
-            path[2] = decodeURIComponent(path[2]);
-            path[2] = JSON.parse(path[2]) || {};
-        }
-
-        const config = {
-            organization_id: path[1],
-            ...path[2]
-        };
-        return config;
     }
 }
 
