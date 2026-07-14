@@ -1,3 +1,21 @@
+# [1.32.0](https://github.com/CoCreate-app/CoCreate-socket-server/compare/v1.31.1...v1.32.0) (2026-07-14)
+
+
+### Bug Fixes
+
+* remove unused mesh.js file and related socket handling logic ([b0cab03](https://github.com/CoCreate-app/CoCreate-socket-server/commit/b0cab03c4c106c109c0d9c13157ae118f6189ef5))
+* removed post install ([c1462c3](https://github.com/CoCreate-app/CoCreate-socket-server/commit/c1462c3874bac9b24444d69334a8a80ee74d4b4f))
+* semantic version handling. Reorganize .gitignore for improved clarity and structure ([3a04ef8](https://github.com/CoCreate-app/CoCreate-socket-server/commit/3a04ef83a5db2aadd96cee6374c8c19129d3aaf2))
+* update module export to ES6 syntax in release.config.js ([958adb2](https://github.com/CoCreate-app/CoCreate-socket-server/commit/958adb2fc45e6828f494def07e57c654f8bd105e))
+* update package.json and refactor for module compatibility ([618fae4](https://github.com/CoCreate-app/CoCreate-socket-server/commit/618fae440238f9196415c2702e2b13a9d231fb15))
+* update WebSocket import for compatibility across module systems ([a8e270a](https://github.com/CoCreate-app/CoCreate-socket-server/commit/a8e270aaeb71b93d7b0a777dcb7ebafa5008bfa5))
+
+
+### Features
+
+* implement heartbeat mechanism for socket connections and enhance organization/client management ([568fb3e](https://github.com/CoCreate-app/CoCreate-socket-server/commit/568fb3efc27da677fb298b3035fe7638d7435440))
+* streamline SocketServer initialization and enhance error handling ([3d102e1](https://github.com/CoCreate-app/CoCreate-socket-server/commit/3d102e18718cb3cda41471a12a437d4d9abad402))
+
 ## [1.31.1](https://github.com/CoCreate-app/CoCreate-socket-server/compare/v1.31.0...v1.31.1) (2025-05-01)
 
 
