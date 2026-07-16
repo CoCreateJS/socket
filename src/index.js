@@ -34,8 +34,12 @@ export class SocketServer extends EventEmitter {
     constructor(server) {
         super();
         
-        // Exclude parent tracking property bounds
+        // Cache reference to primary server process manager - Must be defined
+        this.server = server;
         this.serverId = uid.generate(12);
+        
+        // Dynamic reference tracking context bound to our cluster process topology
+        this.workerId = server.workerId;
         
         // Use ES6 Maps for O(1) lookups and zero-allocation updates
         this.organizations = new Map();
@@ -44,8 +48,8 @@ export class SocketServer extends EventEmitter {
         this.users = new Map();
 
         // Extract isolated helper properties directly from the server instance
-        this.authenticate = server?.authenticate;
-        this.authorize = server?.authorize;
+        this.authenticate = server.authenticate;
+        this.authorize = server.authorize;
 
         config({ organization_id: { prompt: "Enter your organization_id: " } });
 
@@ -55,16 +59,13 @@ export class SocketServer extends EventEmitter {
         this.wss.on("headers", this._handleHeaders.bind(this));
         this.wss.on("error", this._handleWssError.bind(this));
 
-        if (server) {
-            if (server.https) {
-                server.https.on("upgrade", this._upgradeWss.bind(this));
-            }
-            if (server.http) {
-                server.http.on("upgrade", this._upgradeWs.bind(this));
-            }
+        if (server.https) {
+            server.https.on("upgrade", this._upgradeWss.bind(this));
+        }
+        if (server.http) {
+            server.http.on("upgrade", this._upgradeWs.bind(this));
         }
 
-        // Heartbeat interval to clean up silent/dropped connections safely
         this.heartbeatInterval = setInterval(() => {
             this.sockets.forEach((socket) => {
                 if (socket.isAlive === false) {
@@ -248,6 +249,13 @@ export class SocketServer extends EventEmitter {
 
             this.organizations.set(organization_id, organization);
 
+            // Fail-Fast: Directly call send on upstream process. If invalid, crash instantly.
+            this.server.send({
+                method: 'mesh.registerOrg',
+                organization_id,
+                workerId: this.workerId
+            });
+
             this.emit("object.update", {
                 method: "object.update",
                 host: socket.host,
@@ -387,13 +395,22 @@ export class SocketServer extends EventEmitter {
                         organization_id
                     });
 
+                    // We implement a resilient 60-second grace period (instead of 10 seconds)
+                    // to gracefully handle page refreshes, cellular/Wi-Fi toggles, or fast disconnect-reconnect tunnels.
                     clearTimeout(organization.debounce);
                     organization.debounce = setTimeout(() => {
                         const currentOrg = this.organizations.get(organization_id);
                         if (currentOrg && currentOrg.clients.size === 0) {
                             this.organizations.delete(organization_id);
+
+                            // Fail-Fast: Notify Master via upstream process send directly.
+                            this.server.send({
+                                method: 'mesh.deregisterOrg',
+                                organization_id,
+                                workerId: this.workerId
+                            });
                         }
-                    }, 10000);
+                    }, 60000); // 60 seconds resilience guard
                 }
             }
         }
@@ -593,7 +610,6 @@ export class SocketServer extends EventEmitter {
         }
 
         // --- POST-EXECUTION METADATA LOGGING ---
-        // Because this is in send(), the data has completed the module cycle.
         if (
                 !data.error && // Only log successful operations
                 data.log !== false &&
@@ -696,9 +712,15 @@ export class SocketServer extends EventEmitter {
                 });
             }
 
-        // Emit the clean payload so pluggable mesh drivers (like @cocreate/socket-mesh)
-        // can capture this event and broadcast it across server-to-server tunnels
-        this.emit("send", cleanData);
+        // Send data to socketMesh
+        if (cleanData.organization_id) {
+            this.server.send({
+                method: 'mesh.orgData',
+                organization_id: cleanData.organization_id,
+                data: cleanData
+            });
+        }
+
         this.emit("notification", { sent });
     }
 
