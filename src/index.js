@@ -453,8 +453,8 @@ export class SocketServer extends EventEmitter {
 
     async onMessage(socket, message) {
         try {
-            this.emit("setBandwidth", {
-                type: "in",
+            this.emit("usage", {
+                type: "ingress",
                 data: message,
                 organization_id: socket.organization_id
             });
@@ -705,8 +705,8 @@ export class SocketServer extends EventEmitter {
                     sent.push(recipientSocket.clientId);
                 }
                 
-                this.emit("setBandwidth", {
-                    type: "out",
+                this.emit("usage", {
+                    type: "egress",
                     data: finalDataObj,
                     organization_id: recipientSocket.organization_id
                 });
