@@ -66,6 +66,15 @@ export class SocketServer extends EventEmitter {
             server.http.on("upgrade", this._upgradeWs.bind(this));
         }
 
+        // Hook up process-level events to allow other modules (Telemetry, CoCreateServer) to invoke evictions
+        process.on('socket.destroyAll', () => {
+            this.destroyAll();
+        });
+
+        process.on('socket.destroyOrgs', (orgIds) => {
+            this.destroyOrganizations(orgIds);
+        });
+
         this.heartbeatInterval = setInterval(() => {
             this.sockets.forEach((socket) => {
                 if (socket.isAlive === false) {
@@ -226,10 +235,19 @@ export class SocketServer extends EventEmitter {
         });
 
         socket.on("close", () => {
+            // Guard: If we are intentionally tearing down, bypass redundant delete cycles
+            if (socket.bypassDeleteCascade) {
+                socket.removeAllListeners();
+                return;
+            }
             self.delete(socket);
         });
 
         socket.on("error", () => {
+            if (socket.bypassDeleteCascade) {
+                socket.removeAllListeners();
+                return;
+            }
             self.delete(socket);
         });
 
@@ -409,6 +427,9 @@ export class SocketServer extends EventEmitter {
                                 organization_id,
                                 workerId: this.workerId
                             });
+
+                            // Dispatched locally: Cascades a teardown across databases, schedulers, and metrics
+                            process.emit('orgDeleted', organization_id);
                         }
                     }, 60000); // 60 seconds resilience guard
                 }
@@ -449,6 +470,87 @@ export class SocketServer extends EventEmitter {
 
         // Explicit cleanup of listeners to protect V8 GC memory allocation bounds
         socket.removeAllListeners();
+    }
+
+    /**
+     * Instantly evicts one or more organizations from this worker node,
+     * closing all active sockets, freeing maps, and emitting the unified orgDeleted event.
+     * Bypasses the 60-second grace period and avoids redundant master mesh IPC packets.
+     * @param {string|string[]} orgIds - Array of organization IDs to shed
+     */
+    destroyOrganizations(orgIds) {
+        const ids = Array.isArray(orgIds) ? orgIds : [orgIds];
+
+        for (const orgId of ids) {
+            const org = this.organizations.get(orgId);
+            if (!org) continue;
+
+            console.log(`[@cocreate/socket-server] Evicting organization instantly (Shedding/Drain): ${orgId}`);
+
+            // 1. Clear any active inactivity timeouts to prevent double-processing
+            if (org.debounce) {
+                clearTimeout(org.debounce);
+            }
+
+            // 2. Identify all sockets associated with this organization
+            const orgSockets = [];
+            if (org.clients) {
+                for (const clientSocketsMap of org.clients.values()) {
+                    for (const socket of clientSocketsMap.values()) {
+                        orgSockets.push(socket);
+                    }
+                }
+            }
+
+            // 3. Terminate all client connections cleanly
+            for (const socket of orgSockets) {
+                try {
+                    // Send a clean departure frame if open
+                    this._safeSend(socket, { method: "disconnect", reason: "Shedding / Draining Process" });
+                    socket.bypassDeleteCascade = true; // Mark socket so its 'close' event ignores redundant cascades
+                    socket.terminate(); // Force terminate the underlying TCP/TLS connection
+                } catch (err) {
+                    console.error(`[@cocreate/socket-server] Error closing socket during eviction of Org ${orgId}:`, err);
+                }
+                
+                // Clear from global tracking maps
+                this.sockets.delete(socket.id);
+                const globalClientMap = this.clients.get(socket.clientId);
+                if (globalClientMap) {
+                    globalClientMap.delete(socket.id);
+                    if (globalClientMap.size === 0) {
+                        this.clients.delete(socket.clientId);
+                    }
+                }
+
+                // Clean up user sessions
+                if (socket.user_id) {
+                    const userSession = this.users.get(socket.user_id);
+                    if (userSession) {
+                        userSession.sockets.delete(socket.id);
+                        if (userSession.sockets.size === 0) {
+                            clearTimeout(userSession.debounce);
+                            this.users.delete(socket.user_id);
+                        }
+                    }
+                }
+            }
+
+            // 4. Remove the organization completely from the registry
+            this.organizations.delete(orgId);
+
+            // 5. Emit the global process event cascade (MongoDB pools close, Schedulers cancel, Usage flushes)
+            process.emit('orgDeleted', orgId);
+        }
+    }
+
+    /**
+     * Purges all organizations and active connections on this worker instantly.
+     */
+    destroyAll() {
+        console.log(`[@cocreate/socket-server] Instantly purging all organization registries...`);
+        const allOrgIds = Array.from(this.organizations.keys());
+        this.destroyOrganizations(allOrgIds);
     }
 
     async onMessage(socket, message) {
