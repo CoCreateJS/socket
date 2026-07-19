@@ -1,3 +1,18 @@
+# [1.33.0](https://github.com/CoCreate-app/CoCreate-socket-server/compare/v1.32.0...v1.33.0) (2026-07-19)
+
+
+### Bug Fixes
+
+* update branch references from master to main in workflow and configuration files ([2148193](https://github.com/CoCreate-app/CoCreate-socket-server/commit/2148193e0471a193abf8443e6adef3b8b75a4d70))
+
+
+### Features
+
+* add process-level events for organization eviction and cleanup in SocketServer ([fcbe3a2](https://github.com/CoCreate-app/CoCreate-socket-server/commit/fcbe3a24eb87af3bc9d112cfff31f7e7df2c9af2))
+* enhance SocketServer with server reference caching and improved organization management ([2b8daaf](https://github.com/CoCreate-app/CoCreate-socket-server/commit/2b8daafe0a43497be5144f03af562e11b12a2970))
+* rename bandwidth events to usage for clarity in socket message handling ([8f2f549](https://github.com/CoCreate-app/CoCreate-socket-server/commit/8f2f549c031224a29d7d2daf11636cf8688c75dc))
+* update automated workflow and release configuration for improved semantic release handling ([5b8659f](https://github.com/CoCreate-app/CoCreate-socket-server/commit/5b8659ff2430ad0029bea4b740832917429bb548))
+
 # [1.32.0](https://github.com/CoCreate-app/CoCreate-socket-server/compare/v1.31.1...v1.32.0) (2026-07-14)
 
 

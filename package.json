@@ -1,6 +1,6 @@
 {
   "name": "@cocreate/socket-server",
-  "version": "1.31.1",
+  "version": "1.33.0",
   "description": "CoCreate-socket-server",
   "keywords": [
     "cocreate-socket",
@@ -19,7 +19,8 @@
   "main": "./src/index.js",
   "scripts": {
     "demo": "PORT=5000 node demo/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"  },
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/CoCreate-app/CoCreate-socket-server.git"
