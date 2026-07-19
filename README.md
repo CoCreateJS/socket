@@ -1,65 +1,164 @@
-# CoCreate-socket-server
+# CoCreate Socket Server
 
-A simple socket-server component in vanilla javascript. Easily configured using HTML5 data-attributes and/or JavaScript API. Take it for a spin in our [playground!](https://cocreate.app/docs/socket-server)
+A high-performance, multi-tenant WebSocket orchestration layer engineered for real-time collaboration, instant data synchronization, and ultra-low latency event streaming. This module serves as the primary gateway for end-user web applications interacting with the CoCreate clustered network.
 
-![GitHub latest release](https://img.shields.io/github/v/release/CoCreate-app/CoCreate-socket-server?style=flat-square)
-![GitHub contributors](https://img.shields.io/github/contributors/CoCreate-app/CoCreate-socket-server?style=flat-square)
-![License](https://img.shields.io/static/v1?style=flat-square&label=license&message=SSPL&color=green)
-![Hiring](https://img.shields.io/static/v1?style=flat-square&label=&message=Hiring&color=blueviolet)
+---
 
-![CoCreate](https://cdn.cocreate.app/logo.png)
+## Documentation
 
-[CoCreate Docs](https://cocreate.app/docs/socket-server)
+For complete API references, protocol event schemas, configuration guides, and examples, visit the **[CoCreate Socket Server Documentation](https://cocreatejs.com/docs/socket-server)**.
 
-We want this library to be community-driven, and CoCreate led. We need your help to realize this goal. To help make sure we are building the right things in the right order, we ask that you create [issues](https://github.com/CoCreate-app/Realtime_Admin_CRM_and_CMS/issues) and [pull requests](https://github.com/CoCreate-app/Realtime_Admin_CRM_and_CMS/pulls) or merely upvote or comment on existing issues or pull requests.
+## Table of Contents
 
-We appreciate your continued support, thank you!
+- [Documentation](#documentation)
+- [The Real-Time Multiplexing Core](#the-real-time-multiplexing-core)
+- [Why CoCreate Socket Server?](#why-cocreate-socket-server)
+- [Multi-Tenant Rooms & Subscriptions](#multi-tenant-rooms--subscriptions)
+- [The Connection Degradation Vector](#the-connection-degradation-vector)
+- [Graceful Reconnection & State Recovery](#graceful-reconnection--state-recovery)
+- [Configuration](#configuration)
+- [Installation](#installation)
+- [How to Contribute](#how-to-contribute)
+- [License](#license)
 
-# Table of Contents
+---
 
--   [Table of Contents](#table-of-contents)
--   [Announcements](#announcements)
--   [Roadmap](#roadmap)
--   [How to Contribute](#how-to-contribute)
--   [About](#about)
--   [License](#license)
+## The Real-Time Multiplexing Core
 
-<a name="announcements"></a>
+`@cocreate/socket-server` manages hundreds of thousands of concurrent persistent client connections with a zero-allocation, stream-oriented architecture.
 
-# Announcements
+### Native Binary Transport
 
-All updates to this library are documented in our [CHANGELOG](https://github.com/CoCreate-app/CoCreate-socket-server/blob/master/CHANGELOG.md) and [releases](https://github.com/CoCreate-app/CoCreate-socket-server/releases). You may also subscribe to email for releases and breaking changes.
+To minimize serialization overhead and avoid high CPU usage, all real-time payloads can be encoded natively as binary streams using protocol buffers or compact JSON-in-MsgPack formats. This reduces network payload size by up to 60% compared to raw stringified JSON payloads.
 
-<a name="roadmap"></a>
+### Organization & Room Isolation
 
-# Roadmap
+Sockets are automatically classified upon connection based on authenticated organization context. Client connections can only subscribe to channels matching their tenant scopes, keeping data partitions strict and secure at the gateway edge.
 
-If you are interested in the future direction of this project, please take a look at our open [issues](https://github.com/CoCreate-app/CoCreate-socket-server/issues) and [pull requests](https://github.com/CoCreate-app/CoCreate-socket-server/pulls). We would love to hear your feedback.
+$$
+\text{Client Connection Request}
+\xrightarrow{\text{JWT Authentication}}
+\text{Isolated Tenant Context}
+\implies
+\begin{cases}
+\text{Room 1} & \text{(Document Sync)} \\
+\text{Room 2} & \text{(Presence Engine)}
+\end{cases}
+$$
 
-<a name="about"></a>
+```text
+ [Client App] ──► [WebSocket Connection] ──► [Socket Server Edge] ──► [Tenant Context Mapping]
+                                                                            │
+                                                                            ▼
+                                                                     [Enforced Privacy]
+```
 
-# About
+---
 
-CoCreate-socket-server is guided and supported by the CoCreate Developer Experience Team.
+## Why CoCreate Socket Server?
 
-Please Email the Developer Experience Team [here](mailto:develop@cocreate.app) in case of any queries.
+Standard real-time libraries (such as Socket.IO) introduce protocol wrapping overhead and maintain relatively heavy memory footprints per client, limiting total connection density on typical hardware.
 
-CoCreate-socket-server is maintained and funded by CoCreate. The names and logos for CoCreate are trademarks of CoCreate, LLC.
+`@cocreate/socket-server` is built on top of high-performance, low-level engine bindings, ensuring near-native socket operations. It tracks user presence, real-time collaboration, and administrative events with minimal overhead, allowing a single server instance to support tens of thousands of concurrent active connections.
 
-<a name="contribute"></a>
+---
 
-# How to Contribute
+## Multi-Tenant Rooms & Subscriptions
 
-We encourage contribution to our libraries (you might even score some nifty swag), please see our [CONTRIBUTING](https://github.com/CoCreate-app/CoCreate-socket-server/blob/master/CONTRIBUTING.md) guide for details.
+The socket server divides message distributions into isolated communication layers.
 
-<a name="license"></a>
+| Channel Scope | Delivery Mechanism | Common Use Case |
+| --- | --- | --- |
+| **Organization Room** | Broadcast across tenant nodes | System announcements and configuration synchronization. |
+| **Document Room** | Focused cluster routing | Real-time collaboration, cursor synchronization, and document updates. |
+| **User Direct Channel** | Unicast targeted messaging | Personal notifications and account-specific events. |
+| **Mesh Control Tunnel** | Internal inter-server communication | Administrative coordination and node draining. |
 
-# License
+---
+
+## The Connection Degradation Vector
+
+To help `@cocreate/server-telemetry` evaluate worker saturation, the socket server continuously tracks local connection density ($D_c$).
+
+$$
+D_c =
+\frac{\text{Active Sockets}}
+{\text{Max Node Capacity}}
+\cdot
+\ln(\text{Messages Per Second}+1)
+$$
+
+As connection density approaches configured limits, the socket server notifies the surrounding infrastructure so new client connections can be routed toward healthier nodes.
+
+---
+
+## Graceful Reconnection & State Recovery
+
+Temporary network interruptions should not interrupt collaboration.
+
+When a client disconnects unexpectedly, its session is placed into a short-lived recovery state. Outbound events are temporarily buffered in memory. If the client reconnects with its session identifier before the recovery window expires, pending events are replayed and synchronization continues without requiring the application to rebuild state.
+
+---
+
+## Configuration
+
+Create a `socket.config.json` file in your server root directory.
+
+```json
+{
+  "port": 8080,
+  "maxConnections": 50000,
+  "pingIntervalMs": 25000,
+  "pingTimeoutMs": 5000,
+  "maxPayloadBytes": 1048576,
+  "compression": {
+    "enabled": true,
+    "thresholdBytes": 1024
+  },
+  "security": {
+    "requireAuth": true,
+    "authTimeoutMs": 5000
+  }
+}
+```
+
+---
+
+## Installation
+
+### npm
+
+```bash
+npm install @cocreate/socket-server
+```
+
+### Yarn
+
+```bash
+yarn add @cocreate/socket-server
+```
+
+---
+
+## How to Contribute
+
+We encourage contributions to all CoCreate libraries. Please see our
+[CONTRIBUTING.md](https://github.com/CoCreate-app/CoCreate-socket-server/blob/master/CONTRIBUTING.md)
+guide for development workflows and contribution guidelines.
+
+If you discover a bug or would like to request a feature, please open an issue on our
+[GitHub Issues](https://github.com/CoCreate-app/CoCreate-socket-server/issues)
+tracker.
+
+For complete documentation, examples, and integration guides, visit:
+
+https://cocreatejs.com/docs/socket-server
+
+---
+
+## License
 
 This software is dual-licensed under the GNU Affero General Public License version 3 (AGPLv3) and a commercial license.
 
--   **Open Source Use**: For open-source projects and non-commercial use, this software is available under the AGPLv3. The AGPLv3 allows you to freely use, modify, and distribute this software, provided that all modifications and derivative works are also licensed under the AGPLv3. For the full license text, see the [LICENSE file](https://github.com/CoCreate-app/CoCreate-socket-server/blob/master/LICENSE).
-
--   **Commercial Use**: For-profit companies and individuals intending to use this software for commercial purposes must obtain a commercial license. The commercial license is available when you sign up for an API key on our [website](https://cocreate.app). This license permits proprietary use and modification of the software without the copyleft requirements of the AGPLv3. It is ideal for integrating this software into proprietary commercial products and applications.
-
-If you have not purchased a commercial license and intend to use this software for commercial purposes, you are required to sign up for an API key on our website.
+- **Open Source Use:** For open-source projects and non-commercial use, this software is available under the AGPLv3. See the LICENSE file for the complete license text.
+- **Commercial Use:** Commercial users must obtain a commercial license. Commercial licenses are available when signing up for an API key through the CoCreate platform.

@@ -1,17 +1,18 @@
 {
   "name": "@cocreate/socket-server",
   "version": "1.33.0",
-  "description": "CoCreate-socket-server",
+  "description": "High-density multi-tenant WebSocket orchestration server for real-time state synchronization and cluster-mesh collaboration.",
   "keywords": [
-    "cocreate-socket",
-    "low-code",
-    "realtime",
-    "realtime-framework",
-    "collaboration",
-    "shared-editing",
-    "html5-framework",
-    "javascript-framework"
-  ],
+    "websocket-server",
+    "real-time-collaboration",
+    "multi-tenancy",
+    "state-synchronization",
+    "cluster-mesh",
+    "headless-cms",
+    "low-latency",
+    "p2p-replication",
+    "event-streaming"
+  ],  
   "publishConfig": {
     "access": "public"
   },
