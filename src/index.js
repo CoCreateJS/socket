@@ -51,7 +51,7 @@ export class SocketServer extends EventEmitter {
         this.authenticate = server.authenticate;
         this.authorize = server.authorize;
 
-        config({ organization_id: { prompt: "Enter your organization_id: " } });
+        config.request({ organization_id: { prompt: "Enter your organization_id: " } });
 
         this.wss = new WebSocketServer({ noServer: true });
 
