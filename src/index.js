@@ -27,7 +27,7 @@ import ws from 'ws';
 const WebSocketServer = ws.Server || ws.WebSocketServer;
 
 import { URL } from 'node:url';
-import uid from '@cocreate/uuid';
+import { uuid } from '@cocreate/utils';
 import config from '@cocreate/config';
 
 export class SocketServer extends EventEmitter {
@@ -36,7 +36,7 @@ export class SocketServer extends EventEmitter {
         
         // Cache reference to primary server process manager - Must be defined
         this.server = server;
-        this.serverId = uid.generate(12);
+        this.serverId =  uuid(12);
         
         // Dynamic reference tracking context bound to our cluster process topology
         this.workerId = server.workerId;
