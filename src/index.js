@@ -164,6 +164,7 @@ export class SocketServer extends EventEmitter {
                 socket.organization_id = organization_id;
                 socket.id = options.socketId;
                 socket.clientId = options.clientId;
+                socket.clientInfo = options.clientInfo;
                 socket.pathname = request.url;
                 socket.origin = request.headers.origin;
                 socket.host = request.headers.host;
