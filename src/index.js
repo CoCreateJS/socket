@@ -21,11 +21,7 @@
 // For details, visit <https://cocreate.app/licenses/> or contact us at sales@cocreate.app.
 
 import { EventEmitter } from 'node:events';
-import ws from 'ws';
-
-// Robustly fallback across all versions/build environments of ws (CJS vs ESM wrappers)
-const WebSocketServer = ws.Server || ws.WebSocketServer;
-
+import { WebSocketServer } from 'ws';
 import { URL } from 'node:url';
 import { uuid } from '@cocreate/utils';
 import config from '@cocreate/config';
