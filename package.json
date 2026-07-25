@@ -33,8 +33,8 @@
   },
   "homepage": "https://cocreate.app/docs/CoCreate-socket-server",
   "dependencies": {
-    "@cocreate/config": "^1.13.4",
-    "@cocreate/utils": "^1.42.2",
+    "@cocreate/config": "^1.14.3",
+    "@cocreate/utils": "^1.44.3",
     "ws": "^8.21.1"
   }
 }
