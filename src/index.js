@@ -24,7 +24,7 @@ import { EventEmitter } from 'node:events';
 import { WebSocketServer } from 'ws';
 import { URL } from 'node:url';
 import { uuid } from '@cocreate/utils';
-import config from '@cocreate/config';
+import Config from '@cocreate/config';
 
 export class SocketServer extends EventEmitter {
     constructor(server) {
@@ -47,7 +47,7 @@ export class SocketServer extends EventEmitter {
         this.authenticate = server.authenticate;
         this.authorize = server.authorize;
 
-        config.request({ organization_id: { prompt: "Enter your organization_id: " } });
+        Config.prompt({ organization_id: { prompt: "Enter your organization_id: " } });
 
         this.wss = new WebSocketServer({ noServer: true });
 
@@ -710,106 +710,106 @@ export class SocketServer extends EventEmitter {
 
         // --- POST-EXECUTION METADATA LOGGING ---
         if (
-                !data.error && // Only log successful operations
-                data.log !== false &&
-                data.log !== "false" &&
-                !data.method.endsWith(".read") &&
-                data.method !== "updateUserStatus" &&
-                data.method !== "userStatus" &&
-                data.method !== "crdt" && 
-                data.method !== "cursor"
-            ) {
-                let logPayload = {
-                    method: data.method,
-                    organization_id: data.organization_id,
-                    user_id: (socket && socket.user_id) || data.user_id,
-                    timestamp: new Date().toISOString()
-                };
+            !data.error && // Only log successful operations
+            data.log !== false &&
+            data.log !== "false" &&
+            !data.method.endsWith(".read") &&
+            data.method !== "updateUserStatus" &&
+            data.method !== "userStatus" &&
+            data.method !== "crdt" && 
+            data.method !== "cursor"
+        ) {
+            let logPayload = {
+                method: data.method,
+                organization_id: data.organization_id,
+                user_id: (socket && socket.user_id) || data.user_id,
+                timestamp: new Date().toISOString()
+            };
 
-                if (data.endpoint) logPayload.endpoint = data.endpoint;
-                if (data.array) logPayload.array = data.array;
+            if (data.endpoint) logPayload.endpoint = data.endpoint;
+            if (data.array) logPayload.array = data.array;
 
-                if (data.object) {
-                    if (Array.isArray(data.object)) {
-                        const skeletonArray = [];
-                        for (const item of data.object) {
-                            if (item && item._id) skeletonArray.push({ _id: item._id });
-                        }
-                        if (skeletonArray.length > 0) logPayload.object = skeletonArray;
-                    } else if (data.object._id) {
-                        logPayload.object = { _id: data.object._id };
+            if (data.object) {
+                if (Array.isArray(data.object)) {
+                    const skeletonArray = [];
+                    for (const item of data.object) {
+                        if (item && item._id) skeletonArray.push({ _id: item._id });
                     }
+                    if (skeletonArray.length > 0) logPayload.object = skeletonArray;
+                } else if (data.object._id) {
+                    logPayload.object = { _id: data.object._id };
                 }
-
-                this.emit("object.create", {
-                    method: "object.create",
-                    host: data.host || (socket && socket.host),
-                    array: "message_log",
-                    object: logPayload, 
-                    organization_id: data.organization_id
-                });
             }
 
-            let sockets = this.get(data);
-            let cleanData = { ...data };
-            delete cleanData.socket;
-            
-            if (
-                cleanData.$filter &&
-                cleanData.$filter.query &&
-                cleanData.$filter.query._id &&
-                cleanData.$filter.query._id.$eq === "$user_id"
-            ) {
-                delete cleanData.$filter.query._id;
-            }
+            this.emit("object.create", {
+                method: "object.create",
+                host: data.host || (socket && socket.host),
+                array: "message_log",
+                object: logPayload, 
+                organization_id: data.organization_id
+            });
+        }
 
-            const defaultPayloadStr = JSON.stringify(cleanData);
+        let sockets = this.get(data);
+        let cleanData = { ...data };
+        delete cleanData.socket;
+        
+        if (
+            cleanData.$filter &&
+            cleanData.$filter.query &&
+            cleanData.$filter.query._id &&
+            cleanData.$filter.query._id.$eq === "$user_id"
+        ) {
+            delete cleanData.$filter.query._id;
+        }
 
-            for (const recipientSocket of sockets) {
-                if (!recipientSocket) continue;
+        const defaultPayloadStr = JSON.stringify(cleanData);
 
-                let payloadStr = defaultPayloadStr;
-                let finalDataObj = cleanData;
+        for (const recipientSocket of sockets) {
+            if (!recipientSocket) continue;
 
-                if (authorizeService) {
-                    const authResult = await authorizeService.check(
-                        cleanData,
-                        recipientSocket.user_id
-                    );
-                    
-                    if (authResult === false) {
-                        continue;
-                    }
+            let payloadStr = defaultPayloadStr;
+            let finalDataObj = cleanData;
 
-                    if (authResult !== true && authResult && authResult.authorized) {
-                        finalDataObj = { ...authResult.authorized };
-                        delete finalDataObj.socket;
-
-                        if (
-                            finalDataObj.$filter &&
-                            finalDataObj.$filter.query &&
-                            finalDataObj.$filter.query._id &&
-                            finalDataObj.$filter.query._id.$eq === "$user_id"
-                        ) {
-                            delete finalDataObj.$filter.query._id;
-                        }
-                        
-                        payloadStr = JSON.stringify(finalDataObj);
-                    }
-                }
-
-                this._safeSend(recipientSocket, payloadStr);
-
-                if (recipientSocket.clientId) {
-                    sent.push(recipientSocket.clientId);
-                }
+            if (authorizeService) {
+                const authResult = await authorizeService.check(
+                    cleanData,
+                    recipientSocket.user_id
+                );
                 
-                this.emit("usage", {
-                    type: "egress",
-                    data: finalDataObj,
-                    organization_id: recipientSocket.organization_id
-                });
+                if (authResult === false) {
+                    continue;
+                }
+
+                if (authResult !== true && authResult && authResult.authorized) {
+                    finalDataObj = { ...authResult.authorized };
+                    delete finalDataObj.socket;
+
+                    if (
+                        finalDataObj.$filter &&
+                        finalDataObj.$filter.query &&
+                        finalDataObj.$filter.query._id &&
+                        finalDataObj.$filter.query._id.$eq === "$user_id"
+                    ) {
+                        delete finalDataObj.$filter.query._id;
+                    }
+                    
+                    payloadStr = JSON.stringify(finalDataObj);
+                }
             }
+
+            this._safeSend(recipientSocket, payloadStr);
+
+            if (recipientSocket.clientId) {
+                sent.push(recipientSocket.clientId);
+            }
+            
+            this.emit("usage", {
+                type: "egress",
+                data: finalDataObj,
+                organization_id: recipientSocket.organization_id
+            });
+        }
 
         // Send data to socketMesh
         if (cleanData.organization_id) {
