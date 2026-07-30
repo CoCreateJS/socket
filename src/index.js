@@ -21,7 +21,7 @@
 // For details, visit <https://cocreate.app/licenses/> or contact us at sales@cocreate.app.
 
 import { EventEmitter } from 'node:events';
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import { URL } from 'node:url';
 import { uuid } from '@cocreate/utils';
 import Config from '@cocreate/config';
@@ -79,7 +79,7 @@ export class SocketServer extends EventEmitter {
                 }
                 socket.isAlive = false;
                 try {
-                    if (socket.readyState === ws.OPEN) {
+                    if (socket.readyState === WebSocket.OPEN) {
                         socket.ping();
                     } else {
                         socket.terminate();
@@ -826,7 +826,7 @@ export class SocketServer extends EventEmitter {
     // Helper to send payloads safely on valid connections without throwing frame failures
     _safeSend(socket, payload) {
         try {
-            if (socket && socket.readyState === ws.OPEN) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
                 const message = typeof payload === "string" ? payload : JSON.stringify(payload);
                 socket.send(message);
             }
