@@ -565,8 +565,9 @@ export class SocketServer extends EventEmitter {
                 return this._safeSend(socket, { error: "Invalid JSON payload" });
             }
             
-            if (data.method) this.Message(socket, data);
-            else {
+            if (data.method) { 
+                this.Message(socket, data);
+            } else {
                 data.error = "method is required";
                 return this._safeSend(socket, data);
             }
