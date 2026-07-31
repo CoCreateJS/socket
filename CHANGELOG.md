@@ -163,7 +163,7 @@
 
 ### Features
 
-* Added '@cocreate/acme' for dynamic ssl management ([f01831b](https://github.com/CoCreate-app/CoCreate-socket-server/commit/f01831bf2d3a8a4812c369fb61927667af56f7d5))
+* Added '@cocreate/certificates' for dynamic ssl management ([f01831b](https://github.com/CoCreate-app/CoCreate-socket-server/commit/f01831bf2d3a8a4812c369fb61927667af56f7d5))
 
 ## [1.24.3](https://github.com/CoCreate-app/CoCreate-socket-server/compare/v1.24.2...v1.24.3) (2023-12-18)
 
