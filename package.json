@@ -1,6 +1,6 @@
 {
   "name": "@cocreate/socket-server",
-  "version": "1.35.2",
+  "version": "1.36.0",
   "description": "High-density multi-tenant WebSocket orchestration server for real-time state synchronization and cluster-mesh collaboration.",
   "keywords": [
     "websocket-server",
