@@ -32,7 +32,7 @@ export class SocketServer extends EventEmitter {
         
         // Cache reference to primary server process manager - Must be defined
         this.server = server;
-        this.serverId =  uuid(12);
+        this.serverId = uuid(12);
         
         // Dynamic reference tracking context bound to our cluster process topology
         this.workerId = server.workerId;
@@ -413,6 +413,12 @@ export class SocketServer extends EventEmitter {
                     // We implement a resilient 60-second grace period (instead of 10 seconds)
                     // to gracefully handle page refreshes, cellular/Wi-Fi toggles, or fast disconnect-reconnect tunnels.
                     clearTimeout(organization.debounce);
+
+                    // Guard: Prevent primary platform organization from being evicted when all clients disconnect
+                    if (this.server && this.server.organization_id && organization_id === this.server.organization_id) {
+                        return;
+                    }
+
                     organization.debounce = setTimeout(() => {
                         const currentOrg = this.organizations.get(organization_id);
                         if (currentOrg && currentOrg.clients.size === 0) {
@@ -473,12 +479,18 @@ export class SocketServer extends EventEmitter {
      * Instantly evicts one or more organizations from this worker node,
      * closing all active sockets, freeing maps, and emitting the unified orgDeleted event.
      * Bypasses the 60-second grace period and avoids redundant master mesh IPC packets.
+     * Platform organization ID is explicitly excluded from eviction.
      * @param {string|string[]} orgIds - Array of organization IDs to shed
      */
     destroyOrganizations(orgIds) {
         const ids = Array.isArray(orgIds) ? orgIds : [orgIds];
 
         for (const orgId of ids) {
+            // Guard: Prevent platform organization ID from being evicted or triggering orgDeleted
+            if (this.server && this.server.organization_id && orgId === this.server.organization_id) {
+                continue;
+            }
+
             const org = this.organizations.get(orgId);
             if (!org) continue;
 
@@ -552,10 +564,10 @@ export class SocketServer extends EventEmitter {
 
     async onMessage(socket, message) {
         try {
-            this.emit("usage", {
+            this.server.usage.send({
+                organization_id: socket.organization_id,
                 type: "ingress",
-                data: message,
-                organization_id: socket.organization_id
+                payload: message
             });
 
             let data;
@@ -745,7 +757,7 @@ export class SocketServer extends EventEmitter {
             this.emit("object.create", {
                 method: "object.create",
                 host: data.host || (socket && socket.host),
-                array: "message_log",
+                array: "activities",
                 object: logPayload, 
                 organization_id: data.organization_id
             });
@@ -805,10 +817,10 @@ export class SocketServer extends EventEmitter {
                 sent.push(recipientSocket.clientId);
             }
             
-            this.emit("usage", {
+            this.server.usage.send({
+                organization_id: recipientSocket.organization_id,
                 type: "egress",
-                data: finalDataObj,
-                organization_id: recipientSocket.organization_id
+                payload: payloadStr
             });
         }
 
