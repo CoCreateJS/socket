@@ -29,14 +29,14 @@ import Config from '@cocreate/config';
 export class SocketServer extends EventEmitter {
     constructor(server) {
         super();
-        
+
         // Cache reference to primary server process manager - Must be defined
         this.server = server;
         this.serverId = uuid(12);
-        
+
         // Dynamic reference tracking context bound to our cluster process topology
         this.workerId = server.workerId;
-        
+
         // Use ES6 Maps for O(1) lookups and zero-allocation updates
         this.organizations = new Map();
         this.clients = new Map();
@@ -119,10 +119,10 @@ export class SocketServer extends EventEmitter {
 
     upgrade(request, socket, head, protocol) {
         const self = this;
-        
+
         const host = request.headers.host || "localhost";
         const parsedUrl = new URL(request.url, `http://${host}`);
-        
+
         // .filter(Boolean) removes empty strings, protecting against trailing slashes!
         const paths = parsedUrl.pathname.split("/").filter(Boolean);
         // Grab the FIRST segment as the organization_id (e.g., /org_123/namespace/room -> org_123)
@@ -219,7 +219,7 @@ export class SocketServer extends EventEmitter {
 
     onWebSocket(socket) {
         const self = this;
-        
+
         socket.isAlive = true;
         socket.on("pong", () => {
             socket.isAlive = true;
@@ -258,7 +258,7 @@ export class SocketServer extends EventEmitter {
         if (!organization) {
             organization = {
                 status: true,
-                clients: new Map(), 
+                clients: new Map(),
                 debounce: null
             };
 
@@ -311,7 +311,7 @@ export class SocketServer extends EventEmitter {
                 userStatus: "on",
                 organization_id
             });
-            
+
             let userSession = this.users.get(socket.user_id);
 
             if (!userSession) {
@@ -385,7 +385,7 @@ export class SocketServer extends EventEmitter {
         const organization = this.organizations.get(organization_id);
         if (organization && organization.clients) {
             const clientSocketsMap = organization.clients.get(clientId);
-            
+
             if (clientSocketsMap) {
                 clientSocketsMap.delete(socketId);
 
@@ -521,7 +521,7 @@ export class SocketServer extends EventEmitter {
                 } catch (err) {
                     console.error(`[@cocreate/socket-server] Error closing socket during eviction of Org ${orgId}:`, err);
                 }
-                
+
                 // Clear from global tracking maps
                 this.sockets.delete(socket.id);
                 const globalClientMap = this.clients.get(socket.clientId);
@@ -576,8 +576,8 @@ export class SocketServer extends EventEmitter {
             } catch (err) {
                 return this._safeSend(socket, { error: "Invalid JSON payload" });
             }
-            
-            if (data.method) { 
+
+            if (data.method) {
                 this.Message(socket, data);
             } else {
                 data.error = "method is required";
@@ -688,9 +688,9 @@ export class SocketServer extends EventEmitter {
                 if (authorized.authorized) data = authorized.authorized;
             } // End of Authorization Block
 
-            // --- ROUTE TO ENDPOINTS / CRUD OPERATIONS ---
+            // --- ROUTE TO API / CRUD OPERATIONS ---
             if (data.endpoint) {
-                this.emit("endpoint", data);
+                this.emit("api", data);
             } else if (data.method === "crdt" || data.method === "cursor") {
                 this.send(data);
             } else {
@@ -729,7 +729,7 @@ export class SocketServer extends EventEmitter {
             !data.method.endsWith(".read") &&
             data.method !== "updateUserStatus" &&
             data.method !== "userStatus" &&
-            data.method !== "crdt" && 
+            data.method !== "crdt" &&
             data.method !== "cursor"
         ) {
             let logPayload = {
@@ -758,7 +758,7 @@ export class SocketServer extends EventEmitter {
                 method: "object.create",
                 host: data.host || (socket && socket.host),
                 array: "activities",
-                object: logPayload, 
+                object: logPayload,
                 organization_id: data.organization_id
             });
         }
@@ -766,7 +766,7 @@ export class SocketServer extends EventEmitter {
         let sockets = this.get(data);
         let cleanData = { ...data };
         delete cleanData.socket;
-        
+
         if (
             cleanData.$filter &&
             cleanData.$filter.query &&
@@ -789,7 +789,7 @@ export class SocketServer extends EventEmitter {
                     cleanData,
                     recipientSocket.user_id
                 );
-                
+
                 if (authResult === false) {
                     continue;
                 }
@@ -806,7 +806,7 @@ export class SocketServer extends EventEmitter {
                     ) {
                         delete finalDataObj.$filter.query._id;
                     }
-                    
+
                     payloadStr = JSON.stringify(finalDataObj);
                 }
             }
@@ -816,7 +816,7 @@ export class SocketServer extends EventEmitter {
             if (recipientSocket.clientId) {
                 sent.push(recipientSocket.clientId);
             }
-            
+
             this.server.usage.send({
                 organization_id: recipientSocket.organization_id,
                 type: "egress",
