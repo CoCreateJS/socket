@@ -689,7 +689,7 @@ export class SocketServer extends EventEmitter {
             } // End of Authorization Block
 
             // --- ROUTE TO API / CRUD OPERATIONS ---
-            if (data.endpoint) {
+            if (data.api) {
                 this.emit("api", data);
             } else if (data.method === "crdt" || data.method === "cursor") {
                 this.send(data);
