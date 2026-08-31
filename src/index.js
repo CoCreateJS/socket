@@ -768,12 +768,12 @@ export class SocketServer extends EventEmitter {
         delete cleanData.socket;
 
         if (
-            cleanData.$filter &&
-            cleanData.$filter.query &&
-            cleanData.$filter.query._id &&
-            cleanData.$filter.query._id.$eq === "$user_id"
+            cleanData.filter &&
+            cleanData.filter.query &&
+            cleanData.filter.query._id &&
+            cleanData.filter.query._id.$eq === "$user_id"
         ) {
-            delete cleanData.$filter.query._id;
+            delete cleanData.filter.query._id;
         }
 
         const defaultPayloadStr = JSON.stringify(cleanData);
@@ -799,12 +799,12 @@ export class SocketServer extends EventEmitter {
                     delete finalDataObj.socket;
 
                     if (
-                        finalDataObj.$filter &&
-                        finalDataObj.$filter.query &&
-                        finalDataObj.$filter.query._id &&
-                        finalDataObj.$filter.query._id.$eq === "$user_id"
+                        finalDataObj.filter &&
+                        finalDataObj.filter.query &&
+                        finalDataObj.filter.query._id &&
+                        finalDataObj.filter.query._id.$eq === "$user_id"
                     ) {
-                        delete finalDataObj.$filter.query._id;
+                        delete finalDataObj.filter.query._id;
                     }
 
                     payloadStr = JSON.stringify(finalDataObj);
