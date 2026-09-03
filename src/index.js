@@ -259,6 +259,7 @@ export class SocketServer extends EventEmitter {
             organization = {
                 status: true,
                 clients: new Map(),
+                subscriptions: new Map(),
                 debounce: null
             };
 
@@ -320,8 +321,98 @@ export class SocketServer extends EventEmitter {
         }
     }
 
+    subscribe(socket, subscriptionKeys) {
+        const organization = this.organizations.get(socket.organization_id);
+        if (!organization) return;
+        if (!organization.subscriptions)
+            organization.subscriptions = new Map();
+        if (!socket.subscriptionKeys) socket.subscriptionKeys = new Set();
+
+        const keys = Array.isArray(subscriptionKeys)
+            ? subscriptionKeys
+            : subscriptionKeys
+                ? [subscriptionKeys]
+                : [];
+
+        for (const key of keys) {
+            if (typeof key !== "string" || !key) continue;
+
+            let socketIds = organization.subscriptions.get(key);
+            if (!socketIds) {
+                socketIds = new Set();
+                organization.subscriptions.set(key, socketIds);
+            }
+
+            socketIds.add(socket.id);
+            socket.subscriptionKeys.add(key);
+        }
+    }
+
+    unsubscribe(socket, subscriptionKeys) {
+        const organization = this.organizations.get(socket.organization_id);
+        if (!organization?.subscriptions) return;
+
+        const keys = Array.isArray(subscriptionKeys)
+            ? subscriptionKeys
+            : subscriptionKeys
+                ? [subscriptionKeys]
+                : [];
+
+        for (const key of keys) {
+            const socketIds = organization.subscriptions.get(key);
+            if (!socketIds) continue;
+
+            socketIds.delete(socket.id);
+            if (!socketIds.size) organization.subscriptions.delete(key);
+            socket.subscriptionKeys?.delete(key);
+        }
+    }
+
+    removeSubscriptions(socket) {
+        if (!socket.subscriptionKeys?.size) return;
+        this.unsubscribe(socket, [...socket.subscriptionKeys]);
+        socket.subscriptionKeys.clear();
+    }
+
+    getSubscribers(data) {
+        const clients = new Map();
+        const organization = this.organizations.get(data.organization_id);
+        if (!organization?.subscriptions) return clients;
+
+        const socketIds = new Set();
+        for (const key of data.subscriptionKeys) {
+            const subscribedIds = organization.subscriptions.get(key);
+            if (!subscribedIds) continue;
+            for (const socketId of subscribedIds) socketIds.add(socketId);
+        }
+
+        for (const socketId of socketIds) {
+            const socket = this.sockets.get(socketId);
+            if (!socket || socket.organization_id !== data.organization_id)
+                continue;
+
+            let sockets = clients.get(socket.clientId);
+            if (!sockets) {
+                sockets = [];
+                clients.set(socket.clientId, sockets);
+            }
+            sockets.push(socket);
+        }
+
+        return clients;
+    }
+
     get(data) {
         try {
+            if (data.broadcast === "false") data.broadcast = false;
+
+            if (
+                Array.isArray(data.subscriptionKeys) &&
+                data.subscriptionKeys.length
+            ) {
+                return this.getSubscribers(data);
+            }
+
             const clients = new Map();
             const organization = this.organizations.get(data.organization_id);
             if (!organization || !organization.clients) return clients;
@@ -344,7 +435,7 @@ export class SocketServer extends EventEmitter {
                 if (sockets.length) clients.set(clientId, sockets);
             };
 
-            if (data.broadcast !== false) {
+            if (data.broadcast) {
                 for (const [clientId, clientSocketsMap] of clientsMap.entries()) {
                     addClient(
                         clientId,
@@ -376,6 +467,7 @@ export class SocketServer extends EventEmitter {
         const socketId = socket.id;
 
         const organization = this.organizations.get(organization_id);
+        this.removeSubscriptions(socket);
         if (organization && organization.clients) {
             const clientSocketsMap = organization.clients.get(clientId);
 
@@ -501,6 +593,7 @@ export class SocketServer extends EventEmitter {
 
             // 3. Terminate all client connections cleanly
             for (const socket of orgSockets) {
+                this.removeSubscriptions(socket);
                 try {
                     // Send a clean departure frame if open
                     this._safeSend(socket, { method: "disconnect", reason: "Shedding / Draining Process" });
@@ -676,13 +769,26 @@ export class SocketServer extends EventEmitter {
                 if (authorized.authorized) data = authorized.authorized;
             } // End of Authorization Block
 
+            const moduleName = data.method?.split(".")[0];
+            if (
+                ["storage", "database", "array", "index", "object"].includes(
+                    moduleName
+                ) &&
+                data.subscription
+            ) {
+                this.subscribe(socket, data.subscription);
+            }
+
             // --- ROUTE TO API / CRUD OPERATIONS ---
             if (data.api) {
                 this.emit("api", data);
+            } else if (data.method === "unsubscribe") {
+                this.unsubscribe(socket, data.subscription);
+                delete data.socket;
+                this._safeSend(socket, data);
             } else if (data.method === "crdt" || data.method === "cursor") {
                 this.send(data);
             } else {
-                let moduleName = data.method.split(".")[0];
                 if (["storage", "database", "array", "index", "object"].includes(moduleName)) {
                     this.emit(data.method, data);
                 } else {
@@ -698,6 +804,9 @@ export class SocketServer extends EventEmitter {
     async send(data) {
         const socket = data.socket;
         const serverSent = data.serverSent === true;
+        const subscriptionDelivery =
+            Array.isArray(data.subscriptionKeys) &&
+            data.subscriptionKeys.length > 0;
         delete data.serverSent;
         delete data.wsManager;
 
@@ -757,6 +866,7 @@ export class SocketServer extends EventEmitter {
         const clients = this.get(socket ? { ...data, socket } : data);
         let cleanData = { ...data };
         delete cleanData.socket;
+        if (subscriptionDelivery) cleanData.broadcastClient = false;
 
         if (
             cleanData.filter &&
@@ -812,7 +922,7 @@ export class SocketServer extends EventEmitter {
                     type: "egress",
                     payload: payloadStr
                 });
-                break;
+                if (!subscriptionDelivery) break;
             }
         }
 
