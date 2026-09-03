@@ -266,7 +266,7 @@ export class SocketServer extends EventEmitter {
 
             // Fail-Fast: Directly call send on upstream process. If invalid, crash instantly.
             this.server.send({
-                method: 'mesh.registerOrg',
+                method: 'registerOrg',
                 organization_id,
                 workerId: this.workerId
             });
@@ -282,10 +282,6 @@ export class SocketServer extends EventEmitter {
                 organization_id
             });
 
-            this.emit("mesh.create", {
-                url: socket.socketUrl,
-                organization_id
-            });
         } else {
             clearTimeout(organization.debounce);
         }
@@ -326,54 +322,51 @@ export class SocketServer extends EventEmitter {
 
     get(data) {
         try {
-            const sockets = [];
+            const clients = new Map();
             const organization = this.organizations.get(data.organization_id);
-            if (!organization || !organization.clients) return [];
+            if (!organization || !organization.clients) return clients;
 
             const clientsMap = organization.clients;
+            const clientIds = Array.isArray(data.clientId)
+                ? data.clientId
+                : data.clientId
+                    ? [data.clientId]
+                    : [];
+            const addClient = (clientId, clientSocketsMap, originatingSocket) => {
+                const sockets = clientSocketsMap
+                    ? [...clientSocketsMap.values()]
+                    : [];
+                if (originatingSocket) {
+                    const index = sockets.indexOf(originatingSocket);
+                    if (index !== -1) sockets.splice(index, 1);
+                    sockets.unshift(originatingSocket);
+                }
+                if (sockets.length) clients.set(clientId, sockets);
+            };
 
             if (data.broadcast !== false) {
                 for (const [clientId, clientSocketsMap] of clientsMap.entries()) {
-                    if (data.broadcastSender === false && clientId === data.clientId) {
-                        continue;
-                    }
-
-                    if (data.broadcastClient) {
-                        if (clientId === data.clientId) {
-                            const activeSocket = clientSocketsMap.get(data.socket?.id);
-                            if (activeSocket) sockets.push(activeSocket);
-                        } else {
-                            for (const socketInstance of clientSocketsMap.values()) {
-                                sockets.push(socketInstance);
-                                break;
-                            }
-                        }
-                    } else {
-                        for (const socketInstance of clientSocketsMap.values()) {
-                            sockets.push(socketInstance);
-                        }
-                    }
+                    addClient(
+                        clientId,
+                        clientSocketsMap,
+                        data.socket?.clientId === clientId ? data.socket : undefined
+                    );
                 }
-            } else if (data.broadcastSender !== false) {
-                const clientSocketsMap = clientsMap.get(data.clientId);
-                if (clientSocketsMap) {
-                    const activeSocket = clientSocketsMap.get(data.socket?.id);
-                    if (activeSocket) {
-                        sockets.push(activeSocket);
-                    } else {
-                        for (const socketInstance of clientSocketsMap.values()) {
-                            sockets.push(socketInstance);
-                            break;
-                        }
-                    }
-                } else if (data.socket) {
-                    sockets.push(data.socket);
+            } else if (data.socket) {
+                addClient(
+                    data.socket.clientId,
+                    clientsMap.get(data.socket.clientId),
+                    data.socket
+                );
+            } else {
+                for (const clientId of clientIds) {
+                    addClient(clientId, clientsMap.get(clientId));
                 }
             }
-            return sockets;
+            return clients;
         } catch (error) {
             console.error("[SocketServer] Error in get method:", error);
-            return [];
+            return new Map();
         }
     }
 
@@ -405,11 +398,6 @@ export class SocketServer extends EventEmitter {
                         organization_id
                     });
 
-                    this.emit("mesh.update", {
-                        url: socket.socketUrl,
-                        organization_id
-                    });
-
                     // We implement a resilient 60-second grace period (instead of 10 seconds)
                     // to gracefully handle page refreshes, cellular/Wi-Fi toggles, or fast disconnect-reconnect tunnels.
                     clearTimeout(organization.debounce);
@@ -426,7 +414,7 @@ export class SocketServer extends EventEmitter {
 
                             // Fail-Fast: Notify Master via upstream process send directly.
                             this.server.send({
-                                method: 'mesh.deregisterOrg',
+                                method: 'deregisterOrg',
                                 organization_id,
                                 workerId: this.workerId
                             });
@@ -478,7 +466,7 @@ export class SocketServer extends EventEmitter {
     /**
      * Instantly evicts one or more organizations from this worker node,
      * closing all active sockets, freeing maps, and emitting the unified orgDeleted event.
-     * Bypasses the 60-second grace period and avoids redundant master mesh IPC packets.
+     * Bypasses the 60-second grace period and deregisters each organization from IPC.
      * Platform organization ID is explicitly excluded from eviction.
      * @param {string|string[]} orgIds - Array of organization IDs to shed
      */
@@ -548,6 +536,12 @@ export class SocketServer extends EventEmitter {
             // 4. Remove the organization completely from the registry
             this.organizations.delete(orgId);
 
+            this.server.send({
+                method: 'deregisterOrg',
+                organization_id: orgId,
+                workerId: this.workerId
+            });
+
             // 5. Emit the global process event cascade (MongoDB pools close, Schedulers cancel, Usage flushes)
             process.emit('orgDeleted', orgId);
         }
@@ -598,12 +592,6 @@ export class SocketServer extends EventEmitter {
                 data.error = organization.error;
                 return this._safeSend(socket, data);
             }
-
-            if (
-                data.method === "region.added" ||
-                data.method === "region.removed"
-            )
-                console.log("data.method: ", data.method);
 
             if (
                 socket.user_id &&
@@ -709,17 +697,20 @@ export class SocketServer extends EventEmitter {
 
     async send(data) {
         const socket = data.socket;
+        const serverSent = data.serverSent === true;
+        delete data.serverSent;
         delete data.wsManager;
 
-        const authorizeService = this.authorize;
+        for (const property of [
+            "broadcast",
+            "broadcastClient",
+            "broadcastSender"
+        ]) {
+            data[property] = data[property] !== false &&
+                data[property] !== "false";
+        }
 
         const sent = [];
-
-        if (authorizeService && socket) {
-            const authorized = await authorizeService.check(data, socket.user_id);
-            if (authorized && authorized.authorized)
-                data = authorized.authorized;
-        }
 
         // --- POST-EXECUTION METADATA LOGGING ---
         if (
@@ -763,7 +754,7 @@ export class SocketServer extends EventEmitter {
             });
         }
 
-        let sockets = this.get(data);
+        const clients = this.get(socket ? { ...data, socket } : data);
         let cleanData = { ...data };
         delete cleanData.socket;
 
@@ -778,16 +769,17 @@ export class SocketServer extends EventEmitter {
 
         const defaultPayloadStr = JSON.stringify(cleanData);
 
-        for (const recipientSocket of sockets) {
-            if (!recipientSocket) continue;
+        for (const [clientId, sockets] of clients) {
+            const sessionSocket = sockets[0];
+            if (!sessionSocket) continue;
 
             let payloadStr = defaultPayloadStr;
             let finalDataObj = cleanData;
 
-            if (authorizeService) {
-                const authResult = await authorizeService.check(
+            if (this.authorize) {
+                const authResult = await this.authorize.check(
                     cleanData,
-                    recipientSocket.user_id
+                    sessionSocket.user_id
                 );
 
                 if (authResult === false) {
@@ -811,27 +803,21 @@ export class SocketServer extends EventEmitter {
                 }
             }
 
-            this._safeSend(recipientSocket, payloadStr);
+            for (const recipientSocket of sockets) {
+                if (!this._safeSend(recipientSocket, payloadStr)) continue;
 
-            if (recipientSocket.clientId) {
-                sent.push(recipientSocket.clientId);
+                sent.push(clientId);
+                this.server.usage.send({
+                    organization_id: recipientSocket.organization_id,
+                    type: "egress",
+                    payload: payloadStr
+                });
+                break;
             }
-
-            this.server.usage.send({
-                organization_id: recipientSocket.organization_id,
-                type: "egress",
-                payload: payloadStr
-            });
         }
 
-        // Send data to socketMesh
-        if (cleanData.organization_id) {
-            this.server.send({
-                method: 'mesh.orgData',
-                organization_id: cleanData.organization_id,
-                data: cleanData
-            });
-        }
+        if (cleanData.organization_id && !serverSent)
+            this.server.send(cleanData);
 
         this.emit("notification", { sent });
     }
@@ -842,10 +828,12 @@ export class SocketServer extends EventEmitter {
             if (socket && socket.readyState === WebSocket.OPEN) {
                 const message = typeof payload === "string" ? payload : JSON.stringify(payload);
                 socket.send(message);
+                return true;
             }
         } catch (err) {
             console.error("[@cocreate/socket-server] Error safely writing to socket:", err);
         }
+        return false;
     }
 }
 

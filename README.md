@@ -1,6 +1,6 @@
 # CoCreate Socket Server
 
-A high-performance, multi-tenant WebSocket orchestration layer engineered for real-time collaboration, instant data synchronization, and ultra-low latency event streaming. This module serves as the primary gateway for end-user web applications interacting with the CoCreate clustered network.
+A multi-tenant WebSocket server that routes CoCreate JSON envelopes between browser clients, application handlers, and the server mesh.
 
 ---
 
@@ -11,116 +11,91 @@ For complete API references, protocol event schemas, configuration guides, and e
 ## Table of Contents
 
 - [Documentation](#documentation)
-- [The Real-Time Multiplexing Core](#the-real-time-multiplexing-core)
-- [Why CoCreate Socket Server?](#why-cocreate-socket-server)
-- [Multi-Tenant Rooms & Subscriptions](#multi-tenant-rooms--subscriptions)
-- [The Connection Degradation Vector](#the-connection-degradation-vector)
-- [Graceful Reconnection & State Recovery](#graceful-reconnection--state-recovery)
-- [Configuration](#configuration)
+- [Connection](#connection)
+- [Message routing](#message-routing)
+- [Client and socket selection](#client-and-socket-selection)
+- [Authorization](#authorization)
+- [Server mesh](#server-mesh)
+- [Heartbeat and disconnection](#heartbeat-and-disconnection)
 - [Installation](#installation)
 - [How to Contribute](#how-to-contribute)
 - [License](#license)
 
 ---
 
-## The Real-Time Multiplexing Core
+## Connection
 
-`@cocreate/socket-server` manages hundreds of thousands of concurrent persistent client connections with a zero-allocation, stream-oriented architecture.
+Initialize the socket manager with a CoCreate server instance. The server supplies its HTTP and/or HTTPS upgrade source along with optional authentication, authorization, usage, and mesh services.
 
-### Native Binary Transport
+```js
+import SocketServer from "@cocreate/socket-server";
 
-To minimize serialization overhead and avoid high CPU usage, all real-time payloads can be encoded natively as binary streams using protocol buffers or compact JSON-in-MsgPack formats. This reduces network payload size by up to 60% compared to raw stringified JSON payloads.
+const wsManager = await SocketServer.init(server);
+server.wsManager = wsManager;
+```
 
-### Organization & Room Isolation
+The first WebSocket URL path segment is the `organization_id`. Connection options can be supplied as query parameters or as an encoded JSON WebSocket protocol value. Socket-client supplies `socketId`, `clientId`, client information, user information, and an authentication token.
 
-Sockets are automatically classified upon connection based on authenticated organization context. Client connections can only subscribe to channels matching their tenant scopes, keeping data partitions strict and secure at the gateway edge.
-
-$$
-\text{Client Connection Request}
-\xrightarrow{\text{JWT Authentication}}
-\text{Isolated Tenant Context}
-\implies
-\begin{cases}
-\text{Room 1} & \text{(Document Sync)} \\
-\text{Room 2} & \text{(Presence Engine)}
-\end{cases}
-$$
+The server groups each connection as:
 
 ```text
- [Client App] ──► [WebSocket Connection] ──► [Socket Server Edge] ──► [Tenant Context Mapping]
-                                                                            │
-                                                                            ▼
-                                                                     [Enforced Privacy]
+organization_id -> clientId -> socketId -> WebSocket
 ```
 
----
+- `clientId` identifies a browser client and may have multiple connected sockets.
+- `socketId` identifies one WebSocket connection.
+- `frameId` identifies the originating client runtime, but is message metadata rather than a server-side delivery selector.
 
-## Why CoCreate Socket Server?
+## Message routing
 
-Standard real-time libraries (such as Socket.IO) introduce protocol wrapping overhead and maintain relatively heavy memory footprints per client, limiting total connection density on typical hardware.
+Messages are JSON objects and must contain `method`. The same envelope is passed through application handlers and returned to clients.
 
-`@cocreate/socket-server` is built on top of high-performance, low-level engine bindings, ensuring near-native socket operations. It tracks user presence, real-time collaboration, and administrative events with minimal overhead, allowing a single server instance to support tens of thousands of concurrent active connections.
-
----
-
-## Multi-Tenant Rooms & Subscriptions
-
-The socket server divides message distributions into isolated communication layers.
-
-| Channel Scope | Delivery Mechanism | Common Use Case |
-| --- | --- | --- |
-| **Organization Room** | Broadcast across tenant nodes | System announcements and configuration synchronization. |
-| **Document Room** | Focused cluster routing | Real-time collaboration, cursor synchronization, and document updates. |
-| **User Direct Channel** | Unicast targeted messaging | Personal notifications and account-specific events. |
-| **Mesh Control Tunnel** | Internal inter-server communication | Administrative coordination and node draining. |
-
----
-
-## The Connection Degradation Vector
-
-To help `@cocreate/server-telemetry` evaluate worker saturation, the socket server continuously tracks local connection density ($D_c$).
-
-$$
-D_c =
-\frac{\text{Active Sockets}}
-{\text{Max Node Capacity}}
-\cdot
-\ln(\text{Messages Per Second}+1)
-$$
-
-As connection density approaches configured limits, the socket server notifies the surrounding infrastructure so new client connections can be routed toward healthier nodes.
-
----
-
-## Graceful Reconnection & State Recovery
-
-Temporary network interruptions should not interrupt collaboration.
-
-When a client disconnects unexpectedly, its session is placed into a short-lived recovery state. Outbound events are temporarily buffered in memory. If the client reconnects with its session identifier before the recovery window expires, pending events are replayed and synchronization continues without requiring the application to rebuild state.
-
----
-
-## Configuration
-
-Create a `socket.config.json` file in your server root directory.
-
-```json
+```js
 {
-  "port": 8080,
-  "maxConnections": 50000,
-  "pingIntervalMs": 25000,
-  "pingTimeoutMs": 5000,
-  "maxPayloadBytes": 1048576,
-  "compression": {
-    "enabled": true,
-    "thresholdBytes": 1024
-  },
-  "security": {
-    "requireAuth": true,
-    "authTimeoutMs": 5000
-  }
+    method: "notification",
+    message: "The workspace was updated",
+    organization_id: "ORGANIZATION_ID",
+    clientId: "CLIENT_ID",
+    broadcast: false
 }
 ```
+
+Incoming envelopes are dispatched as follows:
+
+- `api` envelopes emit the `api` event.
+- CRUD methods beginning with `storage`, `database`, `array`, `index`, or `object` emit their complete method name.
+- `crdt` and `cursor` messages are sent directly through the socket manager.
+- Other messages emit the top-level portion of `method`.
+
+## Client and socket selection
+
+`send(data)` resolves recipients by organization and client:
+
+- `broadcast !== false` selects every client in the organization.
+- `broadcast === false` with an originating `data.socket` selects that socket's client.
+- A server-originated direct message can provide `clientId` as one string or an array of strings.
+
+For each selected client, the server attempts its connected sockets in order and stops after the first successful write. The originating socket is tried first for its client. This provides socket failover without sending duplicate copies to every socket belonging to the same browser client.
+
+`broadcastClient` and `broadcastSender` are forwarded to socket-client. Browser-context relaying and originating-frame listener suppression are handled on the client; they do not change socket selection on the server.
+
+## Authorization
+
+When authentication is configured, the connection token is decoded and a successfully authenticated socket receives `socket.user_id`. When authorization is configured, incoming messages are checked before dispatch and outgoing messages are checked once per selected client before a socket write is attempted.
+
+Authorization may reject a message or return an authorized envelope. The authorized envelope becomes the payload delivered to that client.
+
+## Server mesh
+
+After local socket delivery, messages containing `organization_id` are forwarded
+unchanged through `server.send()`. IPC routes the original envelope to other local
+workers serving that organization and asks the mesh to forward it only to remote
+servers serving the same organization. `workerId` and `serverId` identify the
+origin so it is not delivered twice.
+
+## Heartbeat and disconnection
+
+The server sends WebSocket ping frames every 30 seconds. Connections that do not answer with a pong before the next heartbeat are terminated and removed from the organization, client, socket, and user maps. Reconnection and queued client messages are managed by socket-client rather than buffered by socket-server.
 
 ---
 
