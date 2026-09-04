@@ -815,8 +815,7 @@ export class SocketServer extends EventEmitter {
             "broadcastClient",
             "broadcastSender"
         ]) {
-            data[property] = data[property] !== false &&
-                data[property] !== "false";
+            if (data[property] === "false") data[property] = false;
         }
 
         const sent = [];
