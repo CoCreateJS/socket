@@ -921,7 +921,7 @@ export class SocketServer extends EventEmitter {
                     type: "egress",
                     payload: payloadStr
                 });
-                if (!subscriptionDelivery) break;
+                break;
             }
         }
 
