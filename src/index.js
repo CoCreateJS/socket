@@ -39,6 +39,7 @@ export class SocketServer extends EventEmitter {
 
         // Use ES6 Maps for O(1) lookups and zero-allocation updates
         this.organizations = new Map();
+        this.organizationBalances = new Map();
         this.clients = new Map();
         this.sockets = new Map();
         this.users = new Map();
@@ -69,6 +70,10 @@ export class SocketServer extends EventEmitter {
 
         process.on('socket.destroyOrgs', (orgIds) => {
             this.destroyOrganizations(orgIds);
+        });
+
+        process.on('organization.balance', (data) => {
+            this.setOrganizationBalance(data, { propagate: true });
         });
 
         this.heartbeatInterval = setInterval(() => {
@@ -131,16 +136,33 @@ export class SocketServer extends EventEmitter {
         this.wss.handleUpgrade(request, socket, head, async function (socket) {
             if (organization_id) {
                 let organization = self.organizations.get(organization_id);
-                if (organization && organization.status === false) {
+                let organizationBalance = self.organizationBalances.get(organization_id);
+                if (self.server?.tls?.checkOrganizationAccess) {
+                    const access = await self.server.tls.checkOrganizationAccess(host);
+                    if (access.organization_id === organization_id) {
+                        if (access.allowed === false) {
+                            organizationBalance = false;
+                            self.organizationBalances.set(organization_id, false);
+                        } else {
+                            organizationBalance = true;
+                            self.organizationBalances.delete(organization_id);
+                        }
+                    }
+                }
+                if (
+                    organizationBalance === false ||
+                    (organization && organization.status === false)
+                ) {
                     let errors = {};
-                    errors.serverOrganization = organization.serverOrganization;
-                    errors.serverStorage = organization.serverStorage;
-                    errors.organizationBalance = organization.organizationBalance;
-                    errors.error = organization.error;
-                    return self._safeSend(socket, {
+                    errors.serverOrganization = organization?.serverOrganization;
+                    errors.serverStorage = organization?.serverStorage;
+                    errors.organizationBalance = organizationBalance ?? organization?.organizationBalance;
+                    errors.error = organization?.error;
+                    self._safeSend(socket, {
                         method: "Access Denied",
                         error: errors
                     });
+                    return socket.close(1008, "Organization balance depleted");
                 }
 
                 // 1. Extract Query Parameters as the baseline options
@@ -258,6 +280,7 @@ export class SocketServer extends EventEmitter {
         if (!organization) {
             organization = {
                 status: true,
+                organizationBalance: this.organizationBalances.get(organization_id),
                 clients: new Map(),
                 subscriptions: new Map(),
                 debounce: null
@@ -511,8 +534,10 @@ export class SocketServer extends EventEmitter {
                                 workerId: this.workerId
                             });
 
-                            // Dispatched locally: Cascades a teardown across databases, schedulers, and metrics
-                            process.emit('orgDeleted', organization_id);
+                            // Dispatched locally: Cascades teardown across databases, schedulers, and metrics.
+                            this.emitOrganizationEvicted(organization_id, {
+                                reason: 'idle'
+                            });
                         }
                     }, 60000); // 60 seconds resilience guard
                 }
@@ -557,18 +582,36 @@ export class SocketServer extends EventEmitter {
 
     /**
      * Instantly evicts one or more organizations from this worker node,
-     * closing all active sockets, freeing maps, and emitting the unified orgDeleted event.
+     * closing all active sockets, freeing maps, and emitting the unified
+     * organization.evicted event.
      * Bypasses the 60-second grace period and deregisters each organization from IPC.
      * Platform organization ID is explicitly excluded from eviction.
      * @param {string|string[]} orgIds - Array of organization IDs to shed
      */
-    destroyOrganizations(orgIds) {
+    destroyOrganizations(orgIds, details = {}) {
         const ids = Array.isArray(orgIds) ? orgIds : [orgIds];
 
         for (const orgId of ids) {
-            // Guard: Prevent platform organization ID from being evicted or triggering orgDeleted
+            // Guard: Prevent platform organization ID from being evicted or triggering cleanup
             if (this.server && this.server.organization_id && orgId === this.server.organization_id) {
                 continue;
+            }
+
+            if (details.propagate && typeof this.server?.send === 'function') {
+                const distributedEvent = {
+                    method: 'organization.evicted',
+                    organization_id: orgId,
+                    reason: details.reason || 'evicted',
+                    organizationBalance: details.organizationBalance,
+                    balance: details.balance,
+                    currency: details.currency
+                };
+                Promise.resolve(this.server.send(distributedEvent)).catch(error => {
+                    console.error(
+                        `[@cocreate/socket-server] Failed to propagate eviction for ${orgId}:`,
+                        error
+                    );
+                });
             }
 
             const org = this.organizations.get(orgId);
@@ -635,9 +678,73 @@ export class SocketServer extends EventEmitter {
                 workerId: this.workerId
             });
 
-            // 5. Emit the global process event cascade (MongoDB pools close, Schedulers cancel, Usage flushes)
-            process.emit('orgDeleted', orgId);
+            // 5. Emit the global process event cascade (database pools close,
+            // schedulers cancel, and usage buffers flush).
+            const { propagate, ...eventDetails } = details;
+            this.emitOrganizationEvicted(orgId, eventDetails);
         }
+    }
+
+    emitOrganizationEvicted(organization_id, details = {}) {
+        const event = {
+            organization_id,
+            reason: details.reason || 'evicted',
+            ...details
+        };
+
+        process.emit('organization.evicted', organization_id, event);
+    }
+
+    setOrganizationBalance(data = {}, options = {}) {
+        const organization_id = data.organization_id;
+        const numericBalance = Number(data.balance);
+        const organizationBalance = typeof data.organizationBalance === 'boolean'
+            ? data.organizationBalance
+            : Number.isFinite(numericBalance)
+                ? numericBalance > 0
+                : undefined;
+        if (!organization_id || typeof organizationBalance !== 'boolean') return;
+
+        if (organizationBalance === false) {
+            this.organizationBalances.set(organization_id, false);
+        } else {
+            this.organizationBalances.delete(organization_id);
+        }
+        const organization = this.organizations.get(organization_id);
+        if (organization) {
+            organization.organizationBalance = organizationBalance;
+            organization.balance = data.balance;
+            organization.error = organizationBalance
+                ? undefined
+                : 'Organization balance depleted';
+        }
+
+        if (organizationBalance === false) {
+            this.destroyOrganizations(organization_id, {
+                reason: 'balance',
+                organizationBalance: false,
+                balance: data.balance,
+                currency: data.currency,
+                propagate: options.propagate === true
+            });
+        } else if (options.propagate === true && typeof this.server?.send === 'function') {
+            Promise.resolve(this.server.send({
+                method: 'organization.balance',
+                organization_id,
+                organizationBalance: true,
+                balance: data.balance,
+                currency: data.currency
+            })).catch(error => {
+                console.error(
+                    `[@cocreate/socket-server] Failed to propagate balance for ${organization_id}:`,
+                    error
+                );
+            });
+        }
+    }
+
+    getOrganizationBalance(organization_id) {
+        return this.organizationBalances.get(organization_id);
     }
 
     /**
@@ -646,7 +753,7 @@ export class SocketServer extends EventEmitter {
     destroyAll() {
         console.log(`[@cocreate/socket-server] Instantly purging all organization registries...`);
         const allOrgIds = Array.from(this.organizations.keys());
-        this.destroyOrganizations(allOrgIds);
+        this.destroyOrganizations(allOrgIds, { reason: 'shutdown' });
     }
 
     async onMessage(socket, message) {
@@ -664,10 +771,10 @@ export class SocketServer extends EventEmitter {
                 return this._safeSend(socket, { error: "Invalid JSON payload" });
             }
 
-            if (data.method) {
+            if (data.method || data.endpoint) {
                 this.Message(socket, data);
             } else {
-                data.error = "method is required";
+                data.error = "method or endpoint is required";
                 return this._safeSend(socket, data);
             }
         } catch (e) {
@@ -809,6 +916,26 @@ export class SocketServer extends EventEmitter {
             data.subscriptionKeys.length > 0;
         delete data.serverSent;
         delete data.wsManager;
+
+        if (data.method === 'organization.balance') {
+            this.setOrganizationBalance(data, { propagate: false });
+            return;
+        }
+
+        if (data.method === 'organization.evicted') {
+            if (
+                typeof data.organizationBalance === 'boolean' ||
+                Number.isFinite(Number(data.balance))
+            ) {
+                this.setOrganizationBalance(data, { propagate: false });
+            } else {
+                this.destroyOrganizations(data.organization_id, {
+                    reason: data.reason || 'evicted',
+                    propagate: false
+                });
+            }
+            return;
+        }
 
         for (const property of [
             "broadcast",
