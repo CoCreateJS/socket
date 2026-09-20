@@ -400,11 +400,10 @@ export class SocketServer extends EventEmitter {
     getSubscribers(data) {
         const clients = new Map();
         const organization = this.organizations.get(data.organization_id);
-        if (!organization?.subscriptions) return clients;
 
         const socketIds = new Set();
         for (const key of data.subscriptionKeys) {
-            const subscribedIds = organization.subscriptions.get(key);
+            const subscribedIds = organization?.subscriptions?.get(key);
             if (!subscribedIds) continue;
             for (const socketId of subscribedIds) socketIds.add(socketId);
         }
@@ -420,6 +419,21 @@ export class SocketServer extends EventEmitter {
                 clients.set(socket.clientId, sockets);
             }
             sockets.push(socket);
+        }
+
+        const origin = data.socket;
+        if (origin) {
+            const sockets = clients.get(origin.clientId) || [];
+            clients.set(origin.clientId, [origin, ...sockets]);
+        }
+
+        // Subscriptions select clients; any tab of that client can provide failover.
+        for (const [clientId, sockets] of clients) {
+            const fallbackSockets = organization?.clients?.get(clientId);
+            clients.set(clientId, [...new Set([
+                ...sockets,
+                ...(fallbackSockets ? fallbackSockets.values() : [])
+            ])]);
         }
 
         return clients;
@@ -438,9 +452,7 @@ export class SocketServer extends EventEmitter {
 
             const clients = new Map();
             const organization = this.organizations.get(data.organization_id);
-            if (!organization || !organization.clients) return clients;
-
-            const clientsMap = organization.clients;
+            const clientsMap = organization?.clients || new Map();
             const clientIds = Array.isArray(data.clientId)
                 ? data.clientId
                 : data.clientId
@@ -476,6 +488,14 @@ export class SocketServer extends EventEmitter {
                 for (const clientId of clientIds) {
                     addClient(clientId, clientsMap.get(clientId));
                 }
+            }
+            // The requester receives its response independently of recipient lookup.
+            if (data.socket) {
+                addClient(
+                    data.socket.clientId,
+                    clientsMap.get(data.socket.clientId),
+                    data.socket
+                );
             }
             return clients;
         } catch (error) {
@@ -1040,7 +1060,7 @@ export class SocketServer extends EventEmitter {
             }
 
             for (const recipientSocket of sockets) {
-                if (!this._safeSend(recipientSocket, payloadStr)) continue;
+                if (!await this._safeSend(recipientSocket, payloadStr)) continue;
 
                 sent.push(clientId);
                 this.server.usage.send({
@@ -1059,12 +1079,13 @@ export class SocketServer extends EventEmitter {
     }
 
     // Helper to send payloads safely on valid connections without throwing frame failures
-    _safeSend(socket, payload) {
+    async _safeSend(socket, payload) {
         try {
             if (socket && socket.readyState === WebSocket.OPEN) {
                 const message = typeof payload === "string" ? payload : JSON.stringify(payload);
-                socket.send(message);
-                return true;
+                return await new Promise((resolve) => {
+                    socket.send(message, (error) => resolve(!error));
+                });
             }
         } catch (err) {
             console.error("[@cocreate/socket-server] Error safely writing to socket:", err);
