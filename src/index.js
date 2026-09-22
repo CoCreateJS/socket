@@ -206,7 +206,8 @@ export class SocketServer extends EventEmitter {
                             await authService.decodeToken(
                                 options.token,
                                 organization_id,
-                                options.clientId
+                                options.clientId,
+                                socket.host
                             );
                         const userStatus = {
                             socket,
