@@ -422,7 +422,10 @@ export class SocketServer extends EventEmitter {
             sockets.push(socket);
         }
 
-        const origin = data.socket;
+        const socketById = this.sockets.get(data.socketId);
+        const origin = socketById?.organization_id === data.organization_id
+            ? socketById
+            : data.socket;
         if (origin) {
             const sockets = clients.get(origin.clientId) || [];
             clients.set(origin.clientId, [origin, ...sockets]);
@@ -459,6 +462,10 @@ export class SocketServer extends EventEmitter {
                 : data.clientId
                     ? [data.clientId]
                     : [];
+            const socketById = this.sockets.get(data.socketId);
+            const origin = socketById?.organization_id === data.organization_id
+                ? socketById
+                : data.socket;
             const addClient = (clientId, clientSocketsMap, originatingSocket) => {
                 const sockets = clientSocketsMap
                     ? [...clientSocketsMap.values()]
@@ -476,14 +483,14 @@ export class SocketServer extends EventEmitter {
                     addClient(
                         clientId,
                         clientSocketsMap,
-                        data.socket?.clientId === clientId ? data.socket : undefined
+                        origin?.clientId === clientId ? origin : undefined
                     );
                 }
-            } else if (data.socket) {
+            } else if (origin) {
                 addClient(
-                    data.socket.clientId,
-                    clientsMap.get(data.socket.clientId),
-                    data.socket
+                    origin.clientId,
+                    clientsMap.get(origin.clientId),
+                    origin
                 );
             } else {
                 for (const clientId of clientIds) {
@@ -491,11 +498,11 @@ export class SocketServer extends EventEmitter {
                 }
             }
             // The requester receives its response independently of recipient lookup.
-            if (data.socket) {
+            if (origin) {
                 addClient(
-                    data.socket.clientId,
-                    clientsMap.get(data.socket.clientId),
-                    data.socket
+                    origin.clientId,
+                    clientsMap.get(origin.clientId),
+                    origin
                 );
             }
             return clients;
