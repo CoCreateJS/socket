@@ -26,6 +26,11 @@ import { URL } from 'node:url';
 import { uuid } from '@cocreate/utils';
 import Config from '@cocreate/config';
 
+/**
+ *
+ * @public
+ * @environment server
+ */
 export class SocketServer extends EventEmitter {
     constructor(server) {
         super();
@@ -615,7 +620,9 @@ export class SocketServer extends EventEmitter {
      * Bypasses the 60-second grace period and deregisters each organization from IPC.
      * Platform organization ID is explicitly excluded from eviction.
      * @param {string|string[]} orgIds - Array of organization IDs to shed
-     */
+ * @private
+ * @environment server
+ */
     destroyOrganizations(orgIds, details = {}) {
         const ids = Array.isArray(orgIds) ? orgIds : [orgIds];
 
@@ -777,7 +784,9 @@ export class SocketServer extends EventEmitter {
 
     /**
      * Purges all organizations and active connections on this worker instantly.
-     */
+ * @private
+ * @environment server
+ */
     destroyAll() {
         console.log(`[@cocreate/socket-server] Instantly purging all organization registries...`);
         const allOrgIds = Array.from(this.organizations.keys());
@@ -1103,3 +1112,18 @@ export class SocketServer extends EventEmitter {
 }
 
 export default SocketServer;
+
+/**
+ *
+ * @name default
+ * @kind member
+ * @public
+ * @environment server
+ */
+
+/**
+ * High-density multi-tenant WebSocket orchestration server for real-time state synchronization and cluster-mesh collaboration.
+ *
+ * @module socket-server
+ * @environment server
+ */
