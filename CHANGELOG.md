@@ -1,3 +1,15 @@
+# [2.0.0](https://github.com/CoCreateJS/socket-server/compare/v1.34.0...v2.0.0) (2026-11-02)
+
+
+### chore
+
+* record package identity migration as breaking ([fe05f08](https://github.com/CoCreateJS/socket-server/commit/fe05f087f48163acdb4cb90b6f0bb6e672ceb5bc))
+
+
+### BREAKING CHANGES
+
+* Consumers must install @cocreate/socket-server and use the renamed CoCreateJS repository identity; the previous package and repository identities are no longer supported.
+
 # [1.34.0](https://github.com/CoCreateJS/socket-server/compare/v1.33.0...v1.34.0) (2026-11-02)
 
 
