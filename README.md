@@ -118,11 +118,11 @@ yarn add @cocreate/socket-server
 ## How to Contribute
 
 We encourage contributions to all CoCreate libraries. Please see our
-[CONTRIBUTING.md](https://github.com/CoCreateJS/CoCreate-socket-server/blob/master/CONTRIBUTING.md)
+[CONTRIBUTING.md](https://github.com/CoCreateJS/socket-server/blob/master/CONTRIBUTING.md)
 guide for development workflows and contribution guidelines.
 
 If you discover a bug or would like to request a feature, please open an issue on our
-[GitHub Issues](https://github.com/CoCreateJS/CoCreate-socket-server/issues)
+[GitHub Issues](https://github.com/CoCreateJS/socket-server/issues)
 tracker.
 
 For complete documentation, examples, and integration guides, visit:
