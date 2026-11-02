@@ -1,3 +1,41 @@
+# [1.34.0](https://github.com/CoCreateJS/socket-server/compare/v1.33.0...v1.34.0) (2026-11-02)
+
+
+### Bug Fixes
+
+* add clientInfo to socket options in SocketServer ([c3d7d52](https://github.com/CoCreateJS/socket-server/commit/c3d7d5221ecedf347c8730f2120035700b01dfdc))
+* add Deno specific entries to .gitignore ([ce5b0eb](https://github.com/CoCreateJS/socket-server/commit/ce5b0eb01c67e4f70b38d4c7e41253c22a045f40))
+* align subscription delivery defaults ([934df16](https://github.com/CoCreateJS/socket-server/commit/934df160b308e2e0a5dbd428ef44bd3ef71f521e))
+* bump [@cocreate](https://github.com/cocreate) dependencies ([b01818a](https://github.com/CoCreateJS/socket-server/commit/b01818a01fd521c43cb6d86de28c9de32cdf7961))
+* bump versions ([849012f](https://github.com/CoCreateJS/socket-server/commit/849012f04a3f8bd25cd9a41188bc071b5b019a82))
+* bump versions ([03ce669](https://github.com/CoCreateJS/socket-server/commit/03ce6691abf272b92cbdbe3a9c95d75c1338ee65))
+* bumped dependencies ([b9fa757](https://github.com/CoCreateJS/socket-server/commit/b9fa75731426c85009e1a3f450018841dda3f4da))
+* data.api ([b8313ea](https://github.com/CoCreateJS/socket-server/commit/b8313ea9583870cc71cc6970c0ee99d40e2ee37f))
+* deliver requester responses with callback-aware socket failover ([3b465d1](https://github.com/CoCreateJS/socket-server/commit/3b465d11a3de834172cfa4168ab0ecbfd77e5d40))
+* emit api ([daa6f31](https://github.com/CoCreateJS/socket-server/commit/daa6f31319fb72c89fb8137470fd26ce553bf509))
+* enhance organization eviction logic and update message payload structure ([e4f43d6](https://github.com/CoCreateJS/socket-server/commit/e4f43d6eabc21cd516e31eeb7b5bf8bf66791428))
+* ensure method is required in message handling ([03818b6](https://github.com/CoCreateJS/socket-server/commit/03818b686882223b79806094151927ec94f156d6))
+* remove trailing slash from node_modules entry in .gitignore ([9f6c69e](https://github.com/CoCreateJS/socket-server/commit/9f6c69ec49a1eacce2469c2bde54a426fd0e4807))
+* replace legacy $filter field with filter ([55a909a](https://github.com/CoCreateJS/socket-server/commit/55a909a4c0fbeb33693d6247e25d711cf8cb315b))
+* replace uuid import with utils and update serverId generation ([328becd](https://github.com/CoCreateJS/socket-server/commit/328becd461ed283592fd437fa74636b0695a00b4))
+* route socket responses by socket id ([88878d9](https://github.com/CoCreateJS/socket-server/commit/88878d98200a46112b311fbdb531a367d372af7f))
+* simplify WebSocketServer import from 'ws' ([5421a52](https://github.com/CoCreateJS/socket-server/commit/5421a52a43de155fea8e57f7861bb68349476081))
+* update config method to use request for organization_id prompt ([240f23a](https://github.com/CoCreateJS/socket-server/commit/240f23a9e1b77933c4be689c8334ef95066ab2b8))
+* update git url ([eae57d5](https://github.com/CoCreateJS/socket-server/commit/eae57d5eee052a0ac3816fe7bceb8617a8ff0b59))
+* update GitHub Actions to use latest versions and sync package.json description ([5d600b6](https://github.com/CoCreateJS/socket-server/commit/5d600b67721c7eff08ea8563737b15d363a75dfd))
+* update import for config and refactor logging logic ([1ea801b](https://github.com/CoCreateJS/socket-server/commit/1ea801b3aa74afa33ca734592b5999d9479dccdb))
+* update ws dependency version to ^8.21.1 ([7d5312c](https://github.com/CoCreateJS/socket-server/commit/7d5312c64472a049e3a006ce680637a1e1d454e6))
+* use WebSocket reference for socket state checks ([364d03d](https://github.com/CoCreateJS/socket-server/commit/364d03df1703e96ab7271b8d60926049bfba0c4a))
+
+
+### Features
+
+* bump all dependencies ([d946772](https://github.com/CoCreateJS/socket-server/commit/d946772b879b07520ed651725a7701a5c4c6640a))
+* bumped all dependency versions ([5336034](https://github.com/CoCreateJS/socket-server/commit/53360347e2e133007ff287f8fa5576c86bc1d3ad))
+* Replace acme with certificates ([6c33cde](https://github.com/CoCreateJS/socket-server/commit/6c33cdeb528c5485fa9a9d41cfbf53b7a2b289f1))
+* route socket messages by subscription ([6b97e18](https://github.com/CoCreateJS/socket-server/commit/6b97e187a760b5558d52b00f9d861035236ed0c9))
+* unify socket routing and organization registration ([d7a0443](https://github.com/CoCreateJS/socket-server/commit/d7a0443e9ad3e96f032e2ddc11bb4f60975e437c))
+
 # [1.33.0](https://github.com/CoCreateJS/CoCreate-socket-server/compare/v1.32.0...v1.33.0) (2026-07-19)
 
 
