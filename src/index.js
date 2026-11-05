@@ -286,6 +286,7 @@ export class SocketServer extends EventEmitter {
         if (!organization) {
             organization = {
                 status: true,
+                isRegistered: true,
                 organizationBalance: this.organizationBalances.get(organization_id),
                 clients: new Map(),
                 subscriptions: new Map(),
@@ -314,6 +315,10 @@ export class SocketServer extends EventEmitter {
 
         } else {
             clearTimeout(organization.debounce);
+            if (!organization.isRegistered) {
+                organization.isRegistered = true;
+                this.server.send({ method: 'registerOrg', organization_id, workerId: this.workerId });
+            }
         }
 
         if (!this.clients.has(socket.clientId)) {
@@ -550,15 +555,10 @@ export class SocketServer extends EventEmitter {
                     // to gracefully handle page refreshes, cellular/Wi-Fi toggles, or fast disconnect-reconnect tunnels.
                     clearTimeout(organization.debounce);
 
-                    // Guard: Prevent primary platform organization from being evicted when all clients disconnect
-                    if (this.server && this.server.organization_id && organization_id === this.server.organization_id) {
-                        return;
-                    }
-
                     organization.debounce = setTimeout(() => {
                         const currentOrg = this.organizations.get(organization_id);
                         if (currentOrg && currentOrg.clients.size === 0) {
-                            this.organizations.delete(organization_id);
+                            currentOrg.isRegistered = false;
 
                             // Fail-Fast: Notify Master via upstream process send directly.
                             this.server.send({
@@ -566,6 +566,10 @@ export class SocketServer extends EventEmitter {
                                 organization_id,
                                 workerId: this.workerId
                             });
+
+                            // Keep the node's own organization loaded while reporting zero clients.
+                            if (organization_id === this.server.organization_id) return;
+                            this.organizations.delete(organization_id);
 
                             // Dispatched locally: Cascades teardown across databases, schedulers, and metrics.
                             this.emitOrganizationEvicted(organization_id, {
