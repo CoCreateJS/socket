@@ -1,3 +1,11 @@
+## [2.0.1](https://github.com/CoCreateJS/socket-server/compare/v2.0.0...v2.0.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* report organization inactivity for scale-to-zero lifecycle ([37b0980](https://github.com/CoCreateJS/socket-server/commit/37b09803bfa97101d60c13d7a9afe9d4366c7a77))
+* upgrade CoCreate dependencies to v2 ([f4001a6](https://github.com/CoCreateJS/socket-server/commit/f4001a623b49affe71f667a833f005916e55b17b))
+
 # [2.0.0](https://github.com/CoCreateJS/socket-server/compare/v1.34.0...v2.0.0) (2026-11-02)
 
 
