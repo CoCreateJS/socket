@@ -42,7 +42,7 @@ test('requesting socket wins over older tabs, with one write per client', async 
     f.socket('older');
     const origin = f.socket('origin');
     f.socket('other', 'other-client');
-    assert.deepEqual(await f.send({ socket: origin, broadcast: true }), ['client', 'other-client']);
+    assert.deepEqual(await f.send({ socketId: origin.id, broadcast: true }), ['client', 'other-client']);
     assert.deepEqual(f.attempts, ['origin', 'other']);
     assert.equal(f.usage.length, 2);
 });
@@ -55,7 +55,7 @@ for (const failure of ['closed', 'callback', 'throw']) {
         f.socket('unused');
         const origin = f.socket('origin', 'client', failure);
         if (failure === 'closed') origin.readyState = 3;
-        assert.deepEqual(await f.send({ socket: origin }), ['client']);
+        assert.deepEqual(await f.send({ socketId: origin.id }), ['client']);
         assert.deepEqual(f.attempts, failure === 'closed' ? ['fallback'] : ['origin', 'fallback']);
         assert.equal(f.usage.length, 1);
     });
@@ -68,7 +68,7 @@ test('subscription delivery includes the origin and uses other tabs as fallback'
     f.socket('subscriber', 'other-client');
     f.socket('unrelated', 'unrelated-client');
     f.subscriptions.get('updates').add('subscriber');
-    assert.deepEqual(await f.send({ socket: origin, subscriptionKeys: ['updates'] }), ['other-client', 'client']);
+    assert.deepEqual(await f.send({ socketId: origin.id, subscriptionKeys: ['updates'] }), ['other-client', 'client']);
     assert.deepEqual(f.attempts, ['subscriber', 'origin', 'fallback']);
 });
 
@@ -78,7 +78,7 @@ test('subscription ordering cannot select an older tab before the origin', async
     const origin = f.socket('origin');
     f.subscriptions.get('updates').add('older');
     f.subscriptions.get('updates').add('origin');
-    await f.send({ socket: origin, subscriptionKeys: ['updates'] });
+    await f.send({ socketId: origin.id, subscriptionKeys: ['updates'] });
     assert.deepEqual(f.attempts, ['origin']);
 });
 
@@ -86,7 +86,7 @@ test('failed writes are not counted as delivery', async () => {
     const f = fixture();
     const origin = f.socket('origin', 'client', 'callback');
     f.socket('fallback', 'client', 'callback');
-    assert.deepEqual(await f.send({ socket: origin }), []);
+    assert.deepEqual(await f.send({ socketId: origin.id }), []);
     assert.equal(f.usage.length, 0);
 });
 
@@ -102,7 +102,7 @@ for (const lookup of ['no matches', 'no subscriptions', 'no organization', 'unre
     test(`requester remains a recipient with ${lookup}`, async () => {
         const f = fixture();
         const origin = f.socket('origin');
-        const data = { socket: origin, subscriptionKeys: ['missing'] };
+        const data = { socketId: origin.id, subscriptionKeys: ['missing'] };
         if (lookup === 'no subscriptions') {
             delete f.manager.organizations.get('org').subscriptions;
         } else if (lookup === 'no organization') {
@@ -164,7 +164,9 @@ test('incoming messages replace client-supplied identity with accepted socket va
         socketId: 'forged-socket',
         clientId: 'forged-client',
         organization_id: 'forged-org',
-        host: 'forged.example'
+        host: 'forged.example',
+        socket: { user_id: 'forged-socket-user', id: 'forged-socket' },
+        replyOrganizationId: 'forged-org'
     };
 
     await f.manager.Message(socket, data);
@@ -174,9 +176,11 @@ test('incoming messages replace client-supplied identity with accepted socket va
     assert.equal(received[0].data.socketId, 'trusted-socket');
     assert.equal(received[0].data.clientId, 'trusted-client');
     assert.equal(received[0].data.organization_id, 'org');
+    assert.equal(received[0].data.replyOrganizationId, 'org');
     assert.equal(received[0].data.host, 'trusted.example');
-    assert.equal(received[0].data.socket, socket, 'Socket remains attached during phase one');
+    assert.equal(received[0].data.socket, undefined, 'Socket objects are not attached to messages');
     assert.equal(received[1].routed, data);
+    assert.equal(received[1].routed.socket, undefined);
 });
 
 test('incoming unauthenticated messages cannot retain a supplied user ID', async () => {
@@ -199,4 +203,43 @@ test('incoming unauthenticated messages cannot retain a supplied user ID', async
     assert.equal(received[0].data.socketId, 'anonymous-socket');
     assert.equal(received[0].data.clientId, 'anonymous-client');
     assert.equal(received[0].data.organization_id, 'org');
+});
+
+test('activity records terminate their own logging flow', async () => {
+    const f = fixture();
+    const activities = [];
+    const pending = [];
+    f.manager.on('object.create', request => {
+        activities.push(request);
+        // Bound a regression instead of allowing it to recurse indefinitely.
+        if (activities.length < 3) pending.push(f.manager.send({ ...request, object: [{ _id: 'activity' }] }));
+    });
+    await f.manager.send({ method: 'object.create', array: 'users', organization_id: 'org', object: [{ _id: 'user' }] });
+    await Promise.all(pending);
+    assert.equal(activities.length, 1);
+    assert.equal(activities[0].log, false);
+    await f.manager.send({ method: 'object.create', array: 'activities', organization_id: 'org', object: [{ _id: 'manual-activity' }] });
+    assert.equal(activities.length, 1, 'Activity writes do not generate more activity writes');
+});
+
+test('storage authorization fallback preserves the trusted tenant reply scope', async () => {
+    const f = fixture();
+    const socket = f.socket('socket');
+    f.manager.authorize = { check: async data => data.organization_id === 'org' ? { serverStorage: false } : true };
+    let received;
+    f.manager.on('object.read', data => { received = data; });
+    const previous = process.env.organization_id;
+    process.env.organization_id = 'platform';
+    try {
+        await f.manager.Message(socket, {
+            method: 'object.read', array: 'files', replyOrganizationId: 'forged-org'
+        });
+        assert.equal(received.organization_id, 'platform');
+        assert.equal(received.database, 'platform');
+        assert.equal(received.replyOrganizationId, 'org');
+        assert.equal(received.socketId, 'socket');
+    } finally {
+        if (previous === undefined) delete process.env.organization_id;
+        else process.env.organization_id = previous;
+    }
 });

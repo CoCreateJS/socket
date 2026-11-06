@@ -142,15 +142,15 @@ Incoming envelopes are dispatched as follows:
 
 - `api` envelopes emit the `api` event.
 - CRUD methods beginning with `storage`, `database`, `array`, `index`, or `object` emit their complete method name.
-- `crdt` and `cursor` messages are sent directly through the socket manager.
+- `crdt` and `cursor` messages enter `server.send()`.
 - Other messages emit the top-level portion of `method`.
 
 ## Client and socket selection
 
 `send(data)` resolves recipients by organization and client:
 
-- `broadcast !== false` selects every client in the organization.
-- `broadcast === false` with an originating `data.socket` selects that socket's client.
+- `broadcast: true` selects every client in the organization.
+- `socketId` identifies the originating socket and its client.
 - A server-originated direct message can provide `clientId` as one string or an array of strings.
 
 For each selected client, the server attempts its connected sockets in order and stops after the first successful write. The originating socket is tried first for its client, including subscription delivery. Subscription matches select clients, with other sockets for those clients available as fallbacks. A write succeeds only when the WebSocket send callback reports no error. This provides socket failover without sending duplicate copies to every socket belonging to the same browser client.
@@ -160,6 +160,10 @@ For each selected client, the server attempts its connected sockets in order and
 ## Authorization
 
 When authentication is configured, the connection token is decoded and a successfully authenticated socket receives `socket.user_id`. When authorization is configured, incoming messages are checked before dispatch and outgoing messages are checked once per selected client before a socket write is attempted.
+
+Incoming messages receive trusted `user_id`, `socketId`, `clientId`, `organization_id`, and `host` values from the connection. The server discards a supplied `socket` field. Authorization receives the authenticated user separately. `replyOrganizationId` is also stamped by the server so CRUD can restore the connection's reply scope when authorization redirects an operation to platform storage; it is removed from outgoing socket messages.
+
+Activity writes use `log: false`, and records in `activities` do not generate further activity records.
 
 Authorization may reject a message or return an authorized envelope. The authorized envelope becomes the payload delivered to that client.
 

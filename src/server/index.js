@@ -433,7 +433,7 @@ export class SocketServer extends EventEmitter {
         const socketById = this.sockets.get(data.socketId);
         const origin = socketById?.organization_id === data.organization_id
             ? socketById
-            : data.socket;
+            : undefined;
         if (origin) {
             const sockets = clients.get(origin.clientId) || [];
             clients.set(origin.clientId, [origin, ...sockets]);
@@ -473,7 +473,7 @@ export class SocketServer extends EventEmitter {
             const socketById = this.sockets.get(data.socketId);
             const origin = socketById?.organization_id === data.organization_id
                 ? socketById
-                : data.socket;
+                : undefined;
             const addClient = (clientId, clientSocketsMap, originatingSocket) => {
                 const sockets = clientSocketsMap
                     ? [...clientSocketsMap.values()]
@@ -805,6 +805,9 @@ export class SocketServer extends EventEmitter {
         try {
             const organization_id = socket.organization_id;
 
+            // Ignore any client-supplied socket object; stamp scalar connection identity below.
+            delete data.socket;
+
             // Connection identity and scope are authoritative; never accept per-message overrides.
             if (socket.user_id) data.user_id = socket.user_id;
             else delete data.user_id;
@@ -812,6 +815,8 @@ export class SocketServer extends EventEmitter {
             data.clientId = socket.clientId;
             data.organization_id = organization_id;
             data.host = socket.host;
+            // Storage authorization may change organization_id; replies still belong to this connection.
+            data.replyOrganizationId = organization_id;
 
             const organization = this.organizations.get(organization_id);
             if (organization && organization.organizationBalance == false) {
@@ -826,7 +831,6 @@ export class SocketServer extends EventEmitter {
                 new Date(new Date().toISOString()).getTime() >= socket.expires
             ) {
                 await this.server.send({
-                    socket,
                     method: "updateUserStatus",
                     user_id: socket.user_id,
                     host: socket.host,
@@ -852,15 +856,12 @@ export class SocketServer extends EventEmitter {
                     }
                 }
 
-                data.socket = socket;
-
                 const authorized = await authorizeService.check(
                     data,
                     socket.user_id
                 );
                 let errors = {};
                 if (authorized === false) {
-                    delete data.socket;
                     data.error = "authorization failed";
                     return this._safeSend(socket, data);
                 } else if (authorized.serverOrganization === false) {
@@ -895,7 +896,6 @@ export class SocketServer extends EventEmitter {
                     data.serverStorage = organization.serverStorage;
                     data.organizationBalance = organization.organizationBalance;
                     data.error = organization.error;
-                    delete data.socket;
                     return this._safeSend(socket, data);
                 }
 
@@ -917,7 +917,6 @@ export class SocketServer extends EventEmitter {
                 this.emit("api", data);
             } else if (data.method === "unsubscribe") {
                 this.unsubscribe(socket, data.subscription);
-                delete data.socket;
                 this._safeSend(socket, data);
             } else if (data.method === "crdt" || data.method === "cursor") {
                 this.server.send(data);
@@ -935,8 +934,9 @@ export class SocketServer extends EventEmitter {
     }
 
     async send(data) {
-        const socket = data.socket;
         data = { ...data };
+        delete data.socket;
+        delete data.replyOrganizationId;
         const subscriptionDelivery =
             Array.isArray(data.subscriptionKeys) &&
             data.subscriptionKeys.length > 0;
@@ -975,8 +975,10 @@ export class SocketServer extends EventEmitter {
         // --- POST-EXECUTION METADATA LOGGING ---
         if (
             !data.error && // Only log successful operations
+            data.success !== false &&
             data.log !== false &&
             data.log !== "false" &&
+            data.array !== "activities" &&
             !data.method.endsWith(".read") &&
             data.method !== "updateUserStatus" &&
             data.method !== "userStatus" &&
@@ -986,7 +988,7 @@ export class SocketServer extends EventEmitter {
             let logPayload = {
                 method: data.method,
                 organization_id: data.organization_id,
-                user_id: (socket && socket.user_id) || data.user_id,
+                user_id: data.user_id,
                 timestamp: new Date().toISOString()
             };
 
@@ -1007,19 +1009,19 @@ export class SocketServer extends EventEmitter {
 
             this.emit("object.create", {
                 method: "object.create",
-                host: data.host || (socket && socket.host),
+                host: data.host,
                 array: "activities",
+                log: false,
                 object: logPayload,
                 organization_id: data.organization_id
             });
         }
 
-        const clients = this.get(socket ? { ...data, socket } : data);
+        const clients = this.get(data);
         let cleanData = { ...data };
         if (cleanData.filter?.query) {
             cleanData.filter = { ...cleanData.filter, query: { ...cleanData.filter.query } };
         }
-        delete cleanData.socket;
         if (subscriptionDelivery) cleanData.broadcastClient = false;
 
         if (
@@ -1052,7 +1054,6 @@ export class SocketServer extends EventEmitter {
 
                 if (authResult !== true && authResult && authResult.authorized) {
                     finalDataObj = { ...authResult.authorized };
-                    delete finalDataObj.socket;
 
                     if (
                         finalDataObj.filter &&
