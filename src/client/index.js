@@ -109,7 +109,7 @@ const CoCreateSocketClient = {
  * @environment client
  * @environment server
  */
-    messageQueue: new Map(), 
+    messageQueue: new Map(),
     /**
      *
  * @public
@@ -130,28 +130,28 @@ const CoCreateSocketClient = {
  * @environment client
  * @environment server
  */
-    organization: false, 
+    organization: false,
     /**
      *
  * @public
  * @environment client
  * @environment server
  */
-    serverStorage: true, 
+    serverStorage: true,
     /**
      *
  * @public
  * @environment client
  * @environment server
  */
-    serverOrganization: true, 
+    serverOrganization: true,
     /**
      *
  * @public
  * @environment client
  * @environment server
  */
-    organizationBalance: true, 
+    organizationBalance: true,
     /**
      *
  * @public
@@ -169,7 +169,7 @@ const CoCreateSocketClient = {
         this.clientId = config.get("clientId");
         this.clientInfo = await getClientInfo();
         if (!this.clientId || this.clientId === "undefined") {
-            this.clientId = ObjectId().toString() 
+            this.clientId = ObjectId().toString()
             config.set("clientId", this.clientId);
         }
         if (this.clientId && this.clientId.length !== 24 && ObjectId) {
@@ -216,7 +216,7 @@ const CoCreateSocketClient = {
         if (!socket || (!socket.id && !socket.url)) return;
         socketsByUrl.delete(socket.url);
         socketsById.delete(socket.id);
-        
+
         if (socket.readyState === 1) socket.close();
     },
 
@@ -290,7 +290,7 @@ const CoCreateSocketClient = {
             socket.onclose = function (event) {
                 notifyDisconnect(event);
                 switch (event.code) {
-                    case 1000: 
+                    case 1000:
                         console.log("websocket: closed");
                         break;
                     default:
@@ -608,7 +608,7 @@ const CoCreateSocketClient = {
     async getUrls(data = {}) {
         let protocol = "wss";
         let host = data.host || config.get("host"); // Strictly resolved via isomorphic configuration
-        
+
         if (!host && isBrowser) {
             host = getBrowserLocation().host;
         }
@@ -634,7 +634,7 @@ const CoCreateSocketClient = {
             urls = [],
             hostUrls = [];
         let balancer = data.balancer || config.get("balancer"); // Strictly resolved via isomorphic configuration
-        
+
         if (typeof host === "string" && host) {
             host = host.split(",");
             for (let i = 0; i < host.length; i++) {
