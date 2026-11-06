@@ -24,7 +24,6 @@ import Sockets from "./sockets.js";
 import { EventEmitter } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 import { URL } from 'node:url';
-import { uuid } from '@cocreate/utils';
 import Config from '@cocreate/config';
 
 /**
@@ -38,7 +37,7 @@ export class SocketServer extends EventEmitter {
 
         // Cache reference to primary server process manager - Must be defined
         this.server = server;
-        this.serverId = uuid(12);
+        this.serverId = server.id;
 
         // Dynamic reference tracking context bound to our cluster process topology
         this.workerId = server.workerId;

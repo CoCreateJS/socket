@@ -119,7 +119,14 @@ for (const lookup of ['no matches', 'no subscriptions', 'no organization', 'unre
 
 test('socket send is local-only, resolves undefined, and preserves the routing envelope', async () => {
     const f = fixture();
-    f.socket('one');
+    const socket = f.socket('one');
+    Object.assign(f.manager.server, { id: 'node', workerId: 1, cluster_id: 'local-cluster' });
+    const write = socket.send;
+    socket.send = (payload, callback) => {
+        const message = JSON.parse(payload);
+        for (const field of ['serverId', 'workerId', 'clusterId']) assert.equal(field in message, false);
+        write(payload, callback);
+    };
     f.manager.server.send = () => assert.fail('Socket transport must never call server.send');
     const data = { method: 'object.read', organization_id: 'org', clientId: 'client',
         filter: { query: { _id: { $eq: '$user_id' } } } };
