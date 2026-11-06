@@ -116,3 +116,25 @@ for (const lookup of ['no matches', 'no subscriptions', 'no organization', 'unre
         assert.deepEqual(f.attempts, ['origin']);
     });
 }
+
+test('socket send is local-only, resolves undefined, and preserves the routing envelope', async () => {
+    const f = fixture();
+    f.socket('one');
+    f.manager.server.send = () => assert.fail('Socket transport must never call server.send');
+    const data = { method: 'object.read', organization_id: 'org', clientId: 'client',
+        filter: { query: { _id: { $eq: '$user_id' } } } };
+    assert.equal(await f.manager.send(data), undefined);
+    assert.deepEqual(data.filter.query, { _id: { $eq: '$user_id' } });
+    assert.deepEqual(f.attempts, ['one']);
+});
+
+test('incoming cursor dispatch enters server.send instead of raw socket delivery', async () => {
+    const f = fixture();
+    const socket = f.socket('one');
+    const routed = [];
+    f.manager.server.send = data => routed.push(data);
+    f.manager.send = () => assert.fail('Incoming component messages must enter server.send');
+    const data = { method: 'cursor', organization_id: 'org' };
+    await f.manager.Message(socket, data);
+    assert.deepEqual(routed, [data]);
+});

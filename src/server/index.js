@@ -818,7 +818,7 @@ export class SocketServer extends EventEmitter {
                 socket.expires &&
                 new Date(new Date().toISOString()).getTime() >= socket.expires
             ) {
-                await this.send({
+                await this.server.send({
                     socket,
                     method: "updateUserStatus",
                     user_id: socket.user_id,
@@ -914,7 +914,7 @@ export class SocketServer extends EventEmitter {
                 delete data.socket;
                 this._safeSend(socket, data);
             } else if (data.method === "crdt" || data.method === "cursor") {
-                this.send(data);
+                this.server.send(data);
             } else {
                 if (["storage", "database", "array", "index", "object"].includes(moduleName)) {
                     this.emit(data.method, data);
@@ -930,11 +930,10 @@ export class SocketServer extends EventEmitter {
 
     async send(data) {
         const socket = data.socket;
-        const serverSent = data.serverSent === true;
+        data = { ...data };
         const subscriptionDelivery =
             Array.isArray(data.subscriptionKeys) &&
             data.subscriptionKeys.length > 0;
-        delete data.serverSent;
         delete data.wsManager;
 
         if (data.method === 'organization.balance') {
@@ -1011,6 +1010,9 @@ export class SocketServer extends EventEmitter {
 
         const clients = this.get(socket ? { ...data, socket } : data);
         let cleanData = { ...data };
+        if (cleanData.filter?.query) {
+            cleanData.filter = { ...cleanData.filter, query: { ...cleanData.filter.query } };
+        }
         delete cleanData.socket;
         if (subscriptionDelivery) cleanData.broadcastClient = false;
 
@@ -1071,9 +1073,6 @@ export class SocketServer extends EventEmitter {
                 break;
             }
         }
-
-        if (cleanData.organization_id && !serverSent)
-            this.server.send(cleanData);
 
         this.emit("notification", { sent });
     }

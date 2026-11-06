@@ -165,11 +165,17 @@ Authorization may reject a message or return an authorized envelope. The authori
 
 ## Server mesh
 
-After local socket delivery, messages containing `organization_id` are forwarded
-unchanged through `server.send()`. IPC routes the original envelope to other local
-workers serving that organization and asks the mesh to forward it only to remote
-servers serving the same organization. `workerId` and `serverId` identify the
-origin so it is not delivered twice.
+Components send responses through `server.send(envelope)`. The coordinator starts
+local `server.socket.send()` delivery, IPC delivery to the organization's workers,
+and primary-owned `server.cluster.send()` forwarding without waiting for the
+local socket loop first. Receiving workers call their local socket transport.
+Socket send does not call server send, so no socket forwarding flag is needed.
+`workerId` and `serverId` identify the origin to prevent duplicate delivery.
+
+Direct `server.socket.send()` delivers only to this process's clients. Its Promise
+resolves to `undefined` after local authorization and write attempts; awaiting it
+does not wait for a client application response. Use `server.send()` for normal
+component responses and cross-worker or peer delivery.
 
 ## Heartbeat and disconnection
 
