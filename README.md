@@ -1,17 +1,20 @@
 # CoCreate Socket
 
-A multi-tenant WebSocket server that routes CoCreate JSON envelopes between browser clients, application handlers, and the server mesh.
+Client and server WebSocket interfaces for CoCreate. Send JSON envelopes from browsers or Node.js, route them through application handlers and the server mesh, and relay responses across browser contexts.
 
 ---
 
 ## Documentation
 
-For complete API references, protocol event schemas, configuration guides, and examples, visit the **[CoCreate Socket Server Documentation](https://cocreatejs.com/docs/socket)**.
+For complete API references, protocol event schemas, configuration guides, and examples, visit the **[CoCreate Socket Documentation](https://cocreatejs.com/docs/socket)**.
 
 ## Table of Contents
 
 - [Documentation](#documentation)
 - [Client and server exports](#client-and-server-exports)
+- [Client usage](#client-usage)
+- [Client routing controls](#client-routing-controls)
+- [Browser-context delivery](#browser-context-delivery)
 - [Connection](#connection)
 - [Socket collection](#socket-collection)
 - [Message routing](#message-routing)
@@ -20,6 +23,9 @@ For complete API references, protocol event schemas, configuration guides, and e
 - [Server mesh](#server-mesh)
 - [Heartbeat and disconnection](#heartbeat-and-disconnection)
 - [Installation](#installation)
+- [Announcements and roadmap](#announcements-and-roadmap)
+- [About](#about)
+- [Tests](#tests)
 - [How to Contribute](#how-to-contribute)
 - [License](#license)
 
@@ -27,7 +33,7 @@ For complete API references, protocol event schemas, configuration guides, and e
 
 ## Client and server exports
 
-This package now contains both implementations under `src/client/` and `src/server/`. The original Socket Client package remains unchanged.
+This package now contains both implementations under `src/client/` and `src/server/`. Both roles share one package and retain their own transport lifecycle.
 
 ```js
 import { SocketServer, SocketClient } from "@cocreate/socket";
@@ -38,6 +44,40 @@ import Client from "@cocreate/socket/client";
 ```
 
 The Node entry exports both roles. Browser builds resolve the client entry without loading Node server dependencies. The root default export is SocketClient for compatibility with generated CoCreate dependency loaders. The client retains its existing initialization on import. Use the server entry point to import only the server.
+
+## Client usage
+
+Messages use one envelope. The `method` selects the event or operation and the remaining properties contain its payload.
+
+```js
+import { SocketClient } from "@cocreate/socket";
+
+const response = await SocketClient.send({
+    method: "notification",
+    message: "The workspace was updated",
+    broadcast: false,
+    broadcastClient: true
+});
+```
+
+The socket client automatically supplies connection metadata including `clientId`, `frameId`, `socketId`, `organization_id`, `uuid`, and `timeStamp`.
+
+## Client routing controls
+
+-   `clientId` identifies the browser and is shared by its tabs, windows, and same-origin frames.
+-   `frameId` identifies one client runtime, such as a tab, window, or iframe.
+-   `socketId` identifies an individual WebSocket instance. It is generated for each socket and is not shared through session storage.
+-   `broadcast` controls server delivery. `false` targets the originating or selected client; `true` targets eligible clients in the organization.
+-   `broadcastClient` controls whether a received server message is relayed to the browser's other same-origin contexts.
+-   `broadcastSender: false` prevents the originating frame from firing normal method listeners for the response. The response still returns and resolves its UUID promise.
+
+The socket server sends to one connected socket for each selected `clientId`. If one socket cannot be reached, it can try another socket belonging to that client. Browser-context distribution is then handled by the client when `broadcastClient` is enabled.
+
+## Browser-context delivery
+
+The client stores the complete relay payload in the `localSocketMessages` array of the shared `system` IndexedDB database. The `messageQueue` array uses the same internal database. Records retain `organization_id` for organization-scoped filtering, while application databases remain free of socket transport state. The client writes only the record ID and organization ID to the `localSocketMessage` local-storage key, allowing other contexts to retrieve the message without being constrained by local-storage value limits.
+
+The native `storage` event fires in the other same-origin contexts, not in the context that performed the write. The receiving contexts read the IndexedDB record and fire their local listeners. Each new relay also removes records older than five seconds.
 
 ## Connection
 
@@ -133,7 +173,7 @@ origin so it is not delivered twice.
 
 ## Heartbeat and disconnection
 
-The server sends WebSocket ping frames every 30 seconds. Connections that do not answer with a pong before the next heartbeat are terminated and removed from the organization, client, socket, and user maps. Reconnection and queued client messages are managed by socket-client rather than buffered by socket-server.
+The server sends WebSocket ping frames every 30 seconds. Connections that do not answer with a pong before the next heartbeat are terminated and removed from the organization, client, socket, and user maps. Reconnection and queued client messages are managed by socket-client rather than buffered by the server.
 
 ---
 
@@ -152,6 +192,24 @@ yarn add @cocreate/socket
 ```
 
 ---
+
+## Announcements and roadmap
+
+Updates are recorded in [CHANGELOG.md](./CHANGELOG.md) and [GitHub releases](https://github.com/CoCreateJS/socket/releases). Follow [issues](https://github.com/CoCreateJS/socket/issues) and [pull requests](https://github.com/CoCreateJS/socket/pulls) for planned work and feedback.
+
+## About
+
+CoCreate Socket is maintained and funded by CoCreate and supported by the CoCreate Developer Experience Team. Contact [develop@CoCreateJS.com](mailto:develop@CoCreateJS.com) with questions. CoCreate names and logos are trademarks of CoCreate, LLC.
+
+## Tests
+
+Tests are grouped by transport role under `test/server/` and `test/client/`.
+
+```bash
+npm test                # Both roles.
+npm run test:server     # Server collections and delivery.
+npm run test:client     # Client indexes and transport round trips.
+```
 
 ## How to Contribute
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { SocketServer } from '../src/index.js';
+import { SocketServer } from '../../src/server/index.js';
 
 function fixture() {
     const manager = new EventEmitter();
