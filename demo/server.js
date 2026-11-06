@@ -7,7 +7,7 @@ const app = express();
 app.use(cors())
 app.use(urlencoded({ extended: false }));
 
-const socketServer = require("@cocreate/socket-server")
+const socketServer = require("@cocreate/socket")
 const wsManager = new socketServer("ws");
 
 const { createServer } = require('http');

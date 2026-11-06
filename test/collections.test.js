@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { SocketServer } from '../src/index.js';
-import Sockets from '../src/sockets.js';
+import Sockets from '../src/server/sockets.js';
 
 function fixture(t) {
     t.mock.timers.enable({ apis: ['setTimeout'] });

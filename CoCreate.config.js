@@ -8,13 +8,13 @@ module.exports = {
             "object": {
                 "_id": "6204254580b409001727b744",
                 "name": "index.html",
-                "path": "/docs/socket-server",
-                "pathname": "/docs/socket-server/index.html",
+                "path": "/docs/socket",
+                "pathname": "/docs/socket/index.html",
                 "src": "{{./docs/index.html}}",
                 "host": [
                     "*"
                 ],
-                "directory": "socket-server",
+                "directory": "socket",
                 "content-type": "text/html",
                 "public": "true"
             }

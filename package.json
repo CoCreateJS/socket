@@ -1,7 +1,7 @@
 {
-  "name": "@cocreate/socket-server",
+  "name": "@cocreate/socket",
   "version": "2.0.1",
-  "description": "High-density multi-tenant WebSocket orchestration server for real-time state synchronization and cluster-mesh collaboration.",
+  "description": "Client and server WebSocket interfaces for CoCreate.",
   "keywords": [
     "websocket-server",
     "real-time-collaboration",
@@ -24,17 +24,27 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CoCreateJS/socket-server.git"
+    "url": "git+https://github.com/CoCreateJS/socket.git"
   },
   "author": "CoCreate LLC",
   "license": "AGPL-3.0",
   "bugs": {
-    "url": "https://github.com/CoCreateJS/socket-server/issues"
+    "url": "https://github.com/CoCreateJS/socket/issues"
   },
-  "homepage": "https://CoCreateJS.com/docs/CoCreate-socket-server",
+  "homepage": "https://CoCreateJS.com/docs/socket",
   "dependencies": {
     "@cocreate/config": "^2.0.0",
     "@cocreate/utils": "^2.0.0",
+    "@cocreate/organizations": "^2.0.0",
     "ws": "^8.21.1"
-  }
+  },
+  "exports": {
+    ".": {
+      "browser": "./src/client/index.js",
+      "default": "./src/index.js"
+    },
+    "./server": "./src/server/index.js",
+    "./client": "./src/client/index.js"
+  },
+  "browser": "./src/client/index.js"
 }

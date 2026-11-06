@@ -1,4 +1,4 @@
-# CoCreate Socket Server
+# CoCreate Socket
 
 A multi-tenant WebSocket server that routes CoCreate JSON envelopes between browser clients, application handlers, and the server mesh.
 
@@ -6,11 +6,12 @@ A multi-tenant WebSocket server that routes CoCreate JSON envelopes between brow
 
 ## Documentation
 
-For complete API references, protocol event schemas, configuration guides, and examples, visit the **[CoCreate Socket Server Documentation](https://cocreatejs.com/docs/socket-server)**.
+For complete API references, protocol event schemas, configuration guides, and examples, visit the **[CoCreate Socket Server Documentation](https://cocreatejs.com/docs/socket)**.
 
 ## Table of Contents
 
 - [Documentation](#documentation)
+- [Client and server exports](#client-and-server-exports)
 - [Connection](#connection)
 - [Socket collection](#socket-collection)
 - [Message routing](#message-routing)
@@ -24,12 +25,26 @@ For complete API references, protocol event schemas, configuration guides, and e
 
 ---
 
+## Client and server exports
+
+This package now contains both implementations under `src/client/` and `src/server/`. The original Socket Client package remains unchanged.
+
+```js
+import { SocketServer, SocketClient } from "@cocreate/socket";
+
+// Separate entry points:
+import Server from "@cocreate/socket/server";
+import Client from "@cocreate/socket/client";
+```
+
+The Node entry exports both roles. Browser builds resolve the client entry without loading Node server dependencies. The root default export is SocketClient for compatibility with generated CoCreate dependency loaders. The client retains its existing initialization on import. Use the server entry point to import only the server.
+
 ## Connection
 
 Initialize the socket manager with a CoCreate server instance. The server supplies its HTTP and/or HTTPS upgrade source along with optional authentication, authorization, usage, and mesh services.
 
 ```js
-import SocketServer from "@cocreate/socket-server";
+import { SocketServer } from "@cocreate/socket";
 
 const wsManager = await SocketServer.init(server);
 server.wsManager = wsManager; // Existing integrations remain supported.
@@ -127,13 +142,13 @@ The server sends WebSocket ping frames every 30 seconds. Connections that do not
 ### npm
 
 ```bash
-npm install @cocreate/socket-server
+npm install @cocreate/socket
 ```
 
 ### Yarn
 
 ```bash
-yarn add @cocreate/socket-server
+yarn add @cocreate/socket
 ```
 
 ---
@@ -141,16 +156,16 @@ yarn add @cocreate/socket-server
 ## How to Contribute
 
 We encourage contributions to all CoCreate libraries. Please see our
-[CONTRIBUTING.md](https://github.com/CoCreateJS/socket-server/blob/master/CONTRIBUTING.md)
+[CONTRIBUTING.md](https://github.com/CoCreateJS/socket/blob/master/CONTRIBUTING.md)
 guide for development workflows and contribution guidelines.
 
 If you discover a bug or would like to request a feature, please open an issue on our
-[GitHub Issues](https://github.com/CoCreateJS/socket-server/issues)
+[GitHub Issues](https://github.com/CoCreateJS/socket/issues)
 tracker.
 
 For complete documentation, examples, and integration guides, visit:
 
-https://cocreatejs.com/docs/socket-server
+https://cocreatejs.com/docs/socket
 
 ---
 
