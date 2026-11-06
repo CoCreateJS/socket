@@ -283,6 +283,7 @@ export class SocketServer extends EventEmitter {
         let organization_id = socket.organization_id;
 
         let organization = this.organizations.get(organization_id);
+        const firstConnection = !organization || !organization.isRegistered;
         if (!organization) {
             organization = {
                 status: true,
@@ -294,13 +295,6 @@ export class SocketServer extends EventEmitter {
             };
 
             this.organizations.set(organization_id, organization);
-
-            // Fail-Fast: Directly call send on upstream process. If invalid, crash instantly.
-            this.server.send({
-                method: 'registerOrg',
-                organization_id,
-                workerId: this.workerId
-            });
 
             this.emit("object.update", {
                 method: "object.update",
@@ -317,7 +311,6 @@ export class SocketServer extends EventEmitter {
             clearTimeout(organization.debounce);
             if (!organization.isRegistered) {
                 organization.isRegistered = true;
-                this.server.send({ method: 'registerOrg', organization_id, workerId: this.workerId });
             }
         }
 
@@ -332,6 +325,10 @@ export class SocketServer extends EventEmitter {
         this.sockets.set(socket.id, socket);
         this.clients.get(socket.clientId).set(socket.id, socket);
         organization.clients.get(socket.clientId).set(socket.id, socket);
+
+        if (firstConnection) {
+            process.emit('orgConnected', organization_id, { organization_id, workerId: this.workerId });
+        }
 
         if (socket.user_id) {
             this.emit("userStatus", {
@@ -560,19 +557,10 @@ export class SocketServer extends EventEmitter {
                         if (currentOrg && currentOrg.clients.size === 0) {
                             currentOrg.isRegistered = false;
 
-                            // Fail-Fast: Notify Master via upstream process send directly.
-                            this.server.send({
-                                method: 'deregisterOrg',
-                                organization_id,
-                                workerId: this.workerId
-                            });
-
-                            // Keep the node's own organization loaded while reporting zero clients.
-                            if (organization_id === this.server.organization_id) return;
                             this.organizations.delete(organization_id);
 
                             // Dispatched locally: Cascades teardown across databases, schedulers, and metrics.
-                            this.emitOrganizationEvicted(organization_id, {
+                            this.emitOrganizationDisconnected(organization_id, {
                                 reason: 'idle'
                             });
                         }
@@ -620,9 +608,8 @@ export class SocketServer extends EventEmitter {
     /**
      * Instantly evicts one or more organizations from this worker node,
      * closing all active sockets, freeing maps, and emitting the unified
-     * organization.evicted event.
+     * orgDisconnected event.
      * Bypasses the 60-second grace period and deregisters each organization from IPC.
-     * Platform organization ID is explicitly excluded from eviction.
      * @param {string|string[]} orgIds - Array of organization IDs to shed
  * @private
  * @environment server
@@ -631,11 +618,6 @@ export class SocketServer extends EventEmitter {
         const ids = Array.isArray(orgIds) ? orgIds : [orgIds];
 
         for (const orgId of ids) {
-            // Guard: Prevent platform organization ID from being evicted or triggering cleanup
-            if (this.server && this.server.organization_id && orgId === this.server.organization_id) {
-                continue;
-            }
-
             if (details.propagate && typeof this.server?.send === 'function') {
                 const distributedEvent = {
                     method: 'organization.evicted',
@@ -711,27 +693,22 @@ export class SocketServer extends EventEmitter {
             // 4. Remove the organization completely from the registry
             this.organizations.delete(orgId);
 
-            this.server.send({
-                method: 'deregisterOrg',
-                organization_id: orgId,
-                workerId: this.workerId
-            });
-
             // 5. Emit the global process event cascade (database pools close,
             // schedulers cancel, and usage buffers flush).
             const { propagate, ...eventDetails } = details;
-            this.emitOrganizationEvicted(orgId, eventDetails);
+            this.emitOrganizationDisconnected(orgId, eventDetails);
         }
     }
 
-    emitOrganizationEvicted(organization_id, details = {}) {
+    emitOrganizationDisconnected(organization_id, details = {}) {
         const event = {
             organization_id,
             reason: details.reason || 'evicted',
-            ...details
+            ...details,
+            workerId: this.workerId
         };
 
-        process.emit('organization.evicted', organization_id, event);
+        process.emit('orgDisconnected', organization_id, event);
     }
 
     setOrganizationBalance(data = {}, options = {}) {
