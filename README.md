@@ -12,6 +12,7 @@ For complete API references, protocol event schemas, configuration guides, and e
 
 - [Documentation](#documentation)
 - [Connection](#connection)
+- [Socket collection](#socket-collection)
 - [Message routing](#message-routing)
 - [Client and socket selection](#client-and-socket-selection)
 - [Authorization](#authorization)
@@ -31,7 +32,8 @@ Initialize the socket manager with a CoCreate server instance. The server suppli
 import SocketServer from "@cocreate/socket-server";
 
 const wsManager = await SocketServer.init(server);
-server.wsManager = wsManager;
+server.wsManager = wsManager; // Existing integrations remain supported.
+server.socket = wsManager.collection;
 ```
 
 The first WebSocket URL path segment is the `organization_id`. Connection options can be supplied as query parameters or as an encoded JSON WebSocket protocol value. Socket-client supplies `socketId`, `clientId`, client information, user information, and an authentication token.
@@ -45,6 +47,27 @@ organization_id -> clientId -> socketId -> WebSocket
 - `clientId` identifies a browser client and may have multiple connected sockets.
 - `socketId` identifies one WebSocket connection.
 - `frameId` identifies the originating client runtime, but is message metadata rather than a server-side delivery selector.
+
+## Socket collection
+
+CoCreate Server exposes `server.socket` over the existing manager's live indexes and delivery implementation.
+
+```js
+server.socket.get(socketId);             // Original WebSocket object.
+server.socket.set(socketId, { label: "editor" });
+server.socket.size;                      // Live sockets in this process.
+server.socket.send(envelope);
+server.socket.delete(socketId);          // Close and clean up.
+server.socket.clients.get(clientId)?.get(socketId);
+server.socket.organizations.get(organizationId)?.clients.get(clientId);
+server.socket.organizations.get(organizationId)?.subscriptions;
+```
+
+Socket collections support `get`, `has`, `add`, `set`, `delete`, `clear`, `size`, and iteration. `set` updates metadata in place without replacing transport methods, identity, or bookkeeping. It does not create missing sockets.
+
+Client and organization collections support `get`, `has`, `add`, `delete`, `clear`, `size`, and iteration. All `add` methods accept an already authenticated WebSocket with `id`, `clientId`, and `organization_id`, using the existing connection lifecycle. Root `add` returns the socket; client and organization `add` return their corresponding record. Re-adding the same socket is idempotent; conflicting socket IDs are rejected.
+
+Client deletion closes its sockets using the normal organization disconnect grace period. Organization deletion immediately evicts its sockets and presence. Operations preserve the existing `orgConnected` and `orgDisconnected` event flow. `wsManager` remains available for existing integrations.
 
 ## Message routing
 

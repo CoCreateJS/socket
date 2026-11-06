@@ -20,6 +20,7 @@
 // you must obtain a commercial license from CoCreate LLC.
 // For details, visit <https://CoCreateJS.com/licenses/> or contact us at sales@CoCreateJS.com.
 
+import Sockets from "./sockets.js";
 import { EventEmitter } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 import { URL } from 'node:url';
@@ -47,6 +48,7 @@ export class SocketServer extends EventEmitter {
         this.organizationBalances = new Map();
         this.clients = new Map();
         this.sockets = new Map();
+        this.collection = new Sockets(this);
         this.users = new Map();
 
         // Extract isolated helper properties directly from the server instance
