@@ -145,3 +145,58 @@ test('incoming cursor dispatch enters server.send instead of raw socket delivery
     await f.manager.Message(socket, data);
     assert.deepEqual(routed, [data]);
 });
+
+test('incoming messages replace client-supplied identity with accepted socket values', async () => {
+    const f = fixture();
+    const socket = f.socket('trusted-socket', 'trusted-client');
+    Object.assign(socket, { user_id: 'trusted-user', host: 'trusted.example' });
+    const received = [];
+    f.manager.authorize = {
+        check: async (data, userId) => {
+            received.push({ data, userId });
+            return true;
+        }
+    };
+    f.manager.on('api', data => received.push({ routed: data }));
+    const data = {
+        api: 'example',
+        user_id: 'forged-user',
+        socketId: 'forged-socket',
+        clientId: 'forged-client',
+        organization_id: 'forged-org',
+        host: 'forged.example'
+    };
+
+    await f.manager.Message(socket, data);
+
+    assert.equal(received[0].userId, 'trusted-user');
+    assert.equal(received[0].data.user_id, 'trusted-user');
+    assert.equal(received[0].data.socketId, 'trusted-socket');
+    assert.equal(received[0].data.clientId, 'trusted-client');
+    assert.equal(received[0].data.organization_id, 'org');
+    assert.equal(received[0].data.host, 'trusted.example');
+    assert.equal(received[0].data.socket, socket, 'Socket remains attached during phase one');
+    assert.equal(received[1].routed, data);
+});
+
+test('incoming unauthenticated messages cannot retain a supplied user ID', async () => {
+    const f = fixture();
+    const socket = f.socket('anonymous-socket', 'anonymous-client');
+    const received = [];
+    f.manager.authorize = {
+        check: async (data, userId) => {
+            received.push({ data, userId });
+            return true;
+        }
+    };
+    f.manager.on('api', data => received.push({ routed: data }));
+    const data = { api: 'example', user_id: 'forged-user' };
+
+    await f.manager.Message(socket, data);
+
+    assert.equal(received[0].userId, undefined);
+    assert.equal('user_id' in received[0].data, false);
+    assert.equal(received[0].data.socketId, 'anonymous-socket');
+    assert.equal(received[0].data.clientId, 'anonymous-client');
+    assert.equal(received[0].data.organization_id, 'org');
+});

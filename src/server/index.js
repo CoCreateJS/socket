@@ -805,6 +805,14 @@ export class SocketServer extends EventEmitter {
         try {
             const organization_id = socket.organization_id;
 
+            // Connection identity and scope are authoritative; never accept per-message overrides.
+            if (socket.user_id) data.user_id = socket.user_id;
+            else delete data.user_id;
+            data.socketId = socket.id;
+            data.clientId = socket.clientId;
+            data.organization_id = organization_id;
+            data.host = socket.host;
+
             const organization = this.organizations.get(organization_id);
             if (organization && organization.organizationBalance == false) {
                 data.organizationBalance = false;
@@ -845,7 +853,6 @@ export class SocketServer extends EventEmitter {
                 }
 
                 data.socket = socket;
-                data.host = socket.host;
 
                 const authorized = await authorizeService.check(
                     data,
