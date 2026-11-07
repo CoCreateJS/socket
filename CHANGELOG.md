@@ -1,3 +1,27 @@
+# [3.0.0](https://github.com/CoCreateJS/socket/compare/v2.0.1...v3.0.0) (2026-11-07)
+
+
+### Bug Fixes
+
+* apply socket identity to incoming messages ([b46e033](https://github.com/CoCreateJS/socket/commit/b46e033a1d624d11039c5d9659ddc2e562902569))
+* complete unified socket package migration ([516758c](https://github.com/CoCreateJS/socket/commit/516758ce9371b237c42d44beaa180cc7a90b3250))
+* emit unified organization presence transitions ([297c997](https://github.com/CoCreateJS/socket/commit/297c997a79bb786355637c89d84c1030820adbbf))
+* preserve socket payload data ([9e629e3](https://github.com/CoCreateJS/socket/commit/9e629e3e42f0424f9a60bb3407c84be1f447431e))
+* route component responses through unified server send ([e41e06f](https://github.com/CoCreateJS/socket/commit/e41e06f641c272a996c489e73791add5e834808f))
+* route socket replies through server send ([837de15](https://github.com/CoCreateJS/socket/commit/837de151462569bef1f224dfa8b7d49126eef105))
+* use cluster server id for socket origin ([b02accb](https://github.com/CoCreateJS/socket/commit/b02accb59c2f913f1fe7ee0d1e75d2eb9e2ab2e7))
+
+
+### Features
+
+* combine socket client and server in one package ([f3af263](https://github.com/CoCreateJS/socket/commit/f3af263b53a3c60ab7a2b92c0527c7b13fea9186))
+* expose lifecycle-aware socket collections ([e71e5d1](https://github.com/CoCreateJS/socket/commit/e71e5d11aaa79973e28a1d3c4699f9a63744797b))
+
+
+### BREAKING CHANGES
+
+* Replace @cocreate/socket-server with @cocreate/socket. Export SocketClient and SocketServer by name, default to SocketClient, and provide separate client and server entry points.
+
 ## [2.0.1](https://github.com/CoCreateJS/socket/compare/v2.0.0...v2.0.1) (2026-11-05)
 
 
