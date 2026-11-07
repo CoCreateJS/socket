@@ -35,9 +35,9 @@
   },
   "homepage": "https://CoCreateJS.com/docs/socket",
   "dependencies": {
-    "@cocreate/config": "^2.0.0",
-    "@cocreate/utils": "^2.0.0",
-    "@cocreate/organizations": "^2.0.0",
+    "@cocreate/config": "^2.0.1",
+    "@cocreate/utils": "^2.0.2",
+    "@cocreate/organizations": "^3.0.1",
     "ws": "^8.21.1"
   },
   "exports": {
