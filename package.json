@@ -1,6 +1,6 @@
 {
   "name": "@cocreate/socket",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Client and server WebSocket interfaces for CoCreate.",
   "keywords": [
     "websocket-server",

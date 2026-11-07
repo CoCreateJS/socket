@@ -1,3 +1,10 @@
+## [3.0.1](https://github.com/CoCreateJS/socket/compare/v3.0.0...v3.0.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* bump CoCreate dependency versions ([ecf76e9](https://github.com/CoCreateJS/socket/commit/ecf76e9ca350177059d53d15d53ab6b8824332fd))
+
 # [3.0.0](https://github.com/CoCreateJS/socket/compare/v2.0.1...v3.0.0) (2026-11-07)
 
 
