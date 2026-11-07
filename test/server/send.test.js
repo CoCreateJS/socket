@@ -18,7 +18,6 @@ function fixture() {
             id, clientId, organization_id: 'org', readyState: 1,
             send(payload, callback) {
                 attempts.push(id);
-                assert.equal(JSON.parse(payload).socket, undefined);
                 if (failure === 'throw') throw new Error('write failed');
                 setImmediate(() => callback(failure ? new Error('write failed') : undefined));
             }
@@ -96,6 +95,19 @@ test('direct client ID delivery also stops after the first success', async () =>
     f.socket('unused');
     assert.deepEqual(await f.send({ clientId: 'client' }), ['client']);
     assert.deepEqual(f.attempts, ['first']);
+});
+
+test('socket payload data is preserved without participating in recipient selection', async () => {
+    const f = fixture();
+    const origin = f.socket('origin', 'client');
+    f.socket('other', 'other-client');
+    let delivered;
+    const write = origin.send;
+    origin.send = (payload, callback) => { delivered = JSON.parse(payload); write(payload, callback); };
+    const socket = { id: 'other', organization_id: 'another-org', purpose: 'application data' };
+    await f.send({ socketId: 'origin', socket });
+    assert.deepEqual(f.attempts, ['origin']);
+    assert.deepEqual(delivered.socket, socket);
 });
 
 for (const lookup of ['no matches', 'no subscriptions', 'no organization', 'unregistered broadcast']) {
@@ -178,9 +190,9 @@ test('incoming messages replace client-supplied identity with accepted socket va
     assert.equal(received[0].data.organization_id, 'org');
     assert.equal(received[0].data.replyOrganizationId, 'org');
     assert.equal(received[0].data.host, 'trusted.example');
-    assert.equal(received[0].data.socket, undefined, 'Socket objects are not attached to messages');
+    assert.deepEqual(received[0].data.socket, { user_id: 'forged-socket-user', id: 'forged-socket' });
     assert.equal(received[1].routed, data);
-    assert.equal(received[1].routed.socket, undefined);
+    assert.equal(received[1].routed.socket, data.socket);
 });
 
 test('incoming unauthenticated messages cannot retain a supplied user ID', async () => {

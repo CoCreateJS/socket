@@ -805,8 +805,6 @@ export class SocketServer extends EventEmitter {
         try {
             const organization_id = socket.organization_id;
 
-            // Ignore any client-supplied socket object; stamp scalar connection identity below.
-            delete data.socket;
 
             // Connection identity and scope are authoritative; never accept per-message overrides.
             if (socket.user_id) data.user_id = socket.user_id;
@@ -935,7 +933,6 @@ export class SocketServer extends EventEmitter {
 
     async send(data) {
         data = { ...data };
-        delete data.socket;
         delete data.replyOrganizationId;
         const subscriptionDelivery =
             Array.isArray(data.subscriptionKeys) &&

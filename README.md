@@ -161,7 +161,7 @@ For each selected client, the server attempts its connected sockets in order and
 
 When authentication is configured, the connection token is decoded and a successfully authenticated socket receives `socket.user_id`. When authorization is configured, incoming messages are checked before dispatch and outgoing messages are checked once per selected client before a socket write is attempted.
 
-Incoming messages receive trusted `user_id`, `socketId`, `clientId`, `organization_id`, and `host` values from the connection. The server discards a supplied `socket` field. Authorization receives the authenticated user separately. `replyOrganizationId` is also stamped by the server so CRUD can restore the connection's reply scope when authorization redirects an operation to platform storage; it is removed from outgoing socket messages.
+Incoming messages receive trusted `user_id`, `socketId`, `clientId`, `organization_id`, and `host` values from the connection. A `socket` payload field has no transport meaning and is preserved as ordinary application data. Authorization receives the authenticated user separately. `replyOrganizationId` is also stamped by the server so CRUD can restore the connection's reply scope when authorization redirects an operation to platform storage; it is removed from outgoing socket messages.
 
 Activity writes use `log: false`, and records in `activities` do not generate further activity records.
 
