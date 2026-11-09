@@ -42,21 +42,21 @@ function getBrowserLocation() {
     return window.location;
 }
 
-let WS_Impl;
 
 function getIndexeddb() {
     return isBrowser ? window.CoCreate?.indexeddb : null;
 }
 
-async function getWebSocketImpl() {
-    if (WS_Impl) return WS_Impl;
+let webSocketClass = null;
+async function getWebSocketClass() {
+    if (webSocketClass) return webSocketClass;
     if (isBrowser) {
-        WS_Impl = window.WebSocket;
+        webSocketClass = window.WebSocket;
     } else {
         const wsModule = await import("ws");
-        WS_Impl = wsModule.default || wsModule;
+        webSocketClass = wsModule.default || wsModule;
     }
-    return WS_Impl;
+    return webSocketClass;
 }
 
 const socketsByUrl = new Map();
@@ -67,17 +67,32 @@ let organizationPromise = null;
 
 async function getOrganization() {
     let organization_id = config.get("organization_id");
-    if (!organization_id || organization_id === "canceled") {
-        if (isBrowser) {
-            const Organization = await import("@cocreate/organizations");
-            organization_id = await Organization.default.get();
-        } else {
-            organization_id = process.env.ORGANIZATION_ID || "";
-        }
+    if (organization_id === "canceled") {
+        config.delete("organization_id");
+        organization_id = null;
     }
-    if (organization_id) config.set("organization_id", organization_id);
+    if (organization_id) return organization_id;
 
-    return organization_id;
+    if (!isBrowser) {
+        organization_id = process.env.ORGANIZATION_ID || "";
+        if (organization_id) config.set("organization_id", organization_id);
+        return organization_id;
+    }
+
+    const response = await fetch("/offline.html").catch(() => null);
+    organization_id = response?.headers.get("organization");
+    if (organization_id) {
+        config.set("organization_id", organization_id);
+        return organization_id;
+    }
+
+    const prompted = await config.prompt({
+        organization_id: {
+            prompt: "Enter your organization ID, or leave blank to create one:",
+            parse: value => value || ObjectId().toString()
+        }
+    });
+    return prompted.organization_id;
 }
 
 const CoCreateSocketClient = {
@@ -255,7 +270,7 @@ const CoCreateSocketClient = {
                 let opt = JSON.stringify(options);
                 opt = encodeURIComponent(opt);
 
-                const WebSocketClass = await getWebSocketImpl();
+                const WebSocketClass = await getWebSocketClass();
                 socket = new WebSocketClass(url, opt);
                 socket.id = options.socketId;
                 socket.connected = false;
@@ -595,7 +610,7 @@ const CoCreateSocketClient = {
                 if (
                     !self.maxReconnectDelay ||
                     config.currentReconnectDelay <
-                        self.maxReconnectDelay
+                    self.maxReconnectDelay
                 ) {
                     self.delete(url);
                     config.currentReconnectDelay *= 2;
@@ -636,6 +651,7 @@ const CoCreateSocketClient = {
         let balancer = data.balancer || config.get("balancer"); // Strictly resolved via isomorphic configuration
 
         if (typeof host === "string" && host) {
+            const organizationId = data.organization_id || (await this.organization_id()) || "";
             host = host.split(",");
             for (let i = 0; i < host.length; i++) {
                 host[i] = host[i].trim();
@@ -645,11 +661,7 @@ const CoCreateSocketClient = {
                 if (host[i].includes("://")) url = `${host[i]}`;
                 else url = `${protocol}://${host[i]}`;
 
-                url += `/${
-                    data.organization_id ||
-                    (await this.organization_id()) ||
-                    ""
-                }`;
+                url += `/${organizationId}`;
                 if (balancer == "mesh") urls.push(url);
                 else {
                     let socket = this.get(url);
@@ -666,13 +678,9 @@ const CoCreateSocketClient = {
                 }
             }
         } else if (isBrowser) {
-            let newhost = getBrowserLocation().host;
-            url = [`${protocol}://${newhost}`];
-            url += `/${
-                data.organization_id ||
-                (await this.organization_id()) ||
-                ""
-            }`;
+            const newhost = getBrowserLocation().host;
+            const organizationId = data.organization_id || (await this.organization_id()) || "";
+            url = `${protocol}://${newhost}/${organizationId}`;
             urls.push(url);
         } else {
             console.log("missing host");

@@ -20,7 +20,6 @@
 // you must obtain a commercial license from CoCreate LLC.
 // For details, visit <https://CoCreateJS.com/licenses/> or contact us at sales@CoCreateJS.com.
 
-import Sockets from "./sockets.js";
 import { EventEmitter } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 import { URL } from 'node:url';
@@ -47,7 +46,6 @@ export class SocketServer extends EventEmitter {
         this.organizationBalances = new Map();
         this.clients = new Map();
         this.sockets = new Map();
-        this.collection = new Sockets(this);
         this.users = new Map();
 
         // Extract isolated helper properties directly from the server instance
@@ -229,10 +227,10 @@ export class SocketServer extends EventEmitter {
                             socket.user_id = user_id;
                             socket.expires = expires;
                             userStatus.userStatus = "on";
-                            self.emit("notification.user", socket);
+                            self.server.emit("notification.user", socket);
                         }
 
-                        self.emit("userStatus", userStatus);
+                        self.server.emit("userStatus", userStatus);
 
                         self.onWebSocket(socket);
                     } else self.onWebSocket(socket);
@@ -297,7 +295,7 @@ export class SocketServer extends EventEmitter {
 
             this.organizations.set(organization_id, organization);
 
-            this.emit("object.update", {
+        this.server.emit("object.update", {
                 method: "object.update",
                 host: socket.host,
                 array: "organizations",
@@ -332,7 +330,7 @@ export class SocketServer extends EventEmitter {
         }
 
         if (socket.user_id) {
-            this.emit("userStatus", {
+            this.server.emit("userStatus", {
                 socket,
                 host: socket.host,
                 user_id: socket.user_id,
@@ -451,7 +449,7 @@ export class SocketServer extends EventEmitter {
         return clients;
     }
 
-    get(data) {
+    getClients(data) {
         try {
             if (data.broadcast === "false") data.broadcast = false;
 
@@ -520,6 +518,10 @@ export class SocketServer extends EventEmitter {
         }
     }
 
+    get(socketId) {
+        return this.sockets.get(socketId);
+    }
+
     delete(socket) {
         const organization_id = socket.organization_id;
         const clientId = socket.clientId;
@@ -538,7 +540,7 @@ export class SocketServer extends EventEmitter {
                 }
 
                 if (organization.clients.size === 0) {
-                    this.emit("object.update", {
+                    this.server.emit("object.update", {
                         method: "object.update",
                         host: socket.host,
                         array: "organizations",
@@ -589,7 +591,7 @@ export class SocketServer extends EventEmitter {
                     clearTimeout(userSession.debounce);
                     userSession.debounce = setTimeout(() => {
                         this.users.delete(socket.user_id);
-                        this.emit("userStatus", {
+                        this.server.emit("userStatus", {
                             socket,
                             user_id: socket.user_id,
                             host: socket.host,
@@ -791,7 +793,7 @@ export class SocketServer extends EventEmitter {
             }
 
             if (data.method || data.endpoint) {
-                this.Message(socket, data);
+                await this.Message(socket, data);
             } else {
                 data.error = "method or endpoint is required";
                 return this._safeSend(socket, data);
@@ -910,20 +912,20 @@ export class SocketServer extends EventEmitter {
                 this.subscribe(socket, data.subscription);
             }
 
-            // --- ROUTE TO API / CRUD OPERATIONS ---
+            // Dispatch built-in services directly; registered application methods use server.on().
             if (data.api) {
-                this.emit("api", data);
+                await this.server.api.send(data);
             } else if (data.method === "unsubscribe") {
                 this.unsubscribe(socket, data.subscription);
                 this._safeSend(socket, data);
             } else if (data.method === "crdt" || data.method === "cursor") {
                 this.server.send(data);
+            } else if (["storage", "database", "array", "index", "object"].includes(moduleName)) {
+                await this.server.crud.send(data);
+            } else if (moduleName === "workflow") {
+                await this.server.workflow.run(data);
             } else {
-                if (["storage", "database", "array", "index", "object"].includes(moduleName)) {
-                    this.emit(data.method, data);
-                } else {
-                    this.emit(moduleName, data);
-                }
+                this.server.emit(data.method, data);
             }
 
         } catch (e) {
@@ -937,7 +939,6 @@ export class SocketServer extends EventEmitter {
         const subscriptionDelivery =
             Array.isArray(data.subscriptionKeys) &&
             data.subscriptionKeys.length > 0;
-        delete data.wsManager;
 
         if (data.method === 'organization.balance') {
             this.setOrganizationBalance(data, { propagate: false });
@@ -1004,7 +1005,7 @@ export class SocketServer extends EventEmitter {
                 }
             }
 
-            this.emit("object.create", {
+            this.server.emit("object.create", {
                 method: "object.create",
                 host: data.host,
                 array: "activities",
@@ -1014,7 +1015,7 @@ export class SocketServer extends EventEmitter {
             });
         }
 
-        const clients = this.get(data);
+        const clients = this.getClients(data);
         let cleanData = { ...data };
         if (cleanData.filter?.query) {
             cleanData.filter = { ...cleanData.filter, query: { ...cleanData.filter.query } };
@@ -1078,7 +1079,7 @@ export class SocketServer extends EventEmitter {
             }
         }
 
-        this.emit("notification", { sent });
+        this.server.emit("notification", { sent });
     }
 
     // Helper to send payloads safely on valid connections without throwing frame failures
