@@ -148,7 +148,7 @@ Incoming envelopes are dispatched as follows:
 - `socketId` identifies the originating socket and its client.
 - A server-originated direct message can provide `clientId` as one string or an array of strings.
 
-For each selected client, the server attempts its connected sockets in order and stops after the first successful write. The originating socket is tried first for its client, including subscription delivery. Subscription matches select clients, with other sockets for those clients available as fallbacks. A write succeeds only when the WebSocket send callback reports no error. This provides socket failover without sending duplicate copies to every socket belonging to the same browser client.
+For each selected client, the server attempts its connected sockets in order and stops after the first successful write. The originating socket is tried first for its client, including distribution delivery. Distribution references select clients, with other sockets for those clients available as fallbacks. A write succeeds only when the WebSocket send callback reports no error. This provides socket failover without sending duplicate copies to every socket belonging to the same browser client.
 
 `broadcastClient` and `broadcastSender` are forwarded to socket-client. Browser-context relaying and originating-frame listener suppression are handled on the client; they do not change socket selection on the server.
 

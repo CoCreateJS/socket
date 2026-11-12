@@ -24,6 +24,7 @@ import { EventEmitter } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 import { URL } from 'node:url';
 import Config from '@cocreate/config';
+import { addDistribution, getDistribution } from '@cocreate/utils/distribution';
 
 /**
  *
@@ -46,6 +47,13 @@ export class SocketServer extends EventEmitter {
         this.organizationBalances = new Map();
         this.clients = new Map();
         this.sockets = new Map();
+        this.distribution = new Map();
+        server.on('db.distribution.set', payload => {
+            // Socket messages always carry top-level organization identity; DB controls do not.
+            if (payload.organization_id || payload.serverId !== this.serverId) return;
+            this.setDistribution(payload.data);
+            return { ...payload, success: true };
+        });
         this.users = new Map();
 
         // Extract isolated helper properties directly from the server instance
@@ -289,7 +297,6 @@ export class SocketServer extends EventEmitter {
                 isRegistered: true,
                 organizationBalance: this.organizationBalances.get(organization_id),
                 clients: new Map(),
-                subscriptions: new Map(),
                 debounce: null
             };
 
@@ -351,114 +358,32 @@ export class SocketServer extends EventEmitter {
         }
     }
 
-    subscribe(socket, subscriptionKeys) {
-        const organization = this.organizations.get(socket.organization_id);
-        if (!organization) return;
-        if (!organization.subscriptions)
-            organization.subscriptions = new Map();
-        if (!socket.subscriptionKeys) socket.subscriptionKeys = new Set();
-
-        const keys = Array.isArray(subscriptionKeys)
-            ? subscriptionKeys
-            : subscriptionKeys
-                ? [subscriptionKeys]
-                : [];
-
-        for (const key of keys) {
-            if (typeof key !== "string" || !key) continue;
-
-            let socketIds = organization.subscriptions.get(key);
-            if (!socketIds) {
-                socketIds = new Set();
-                organization.subscriptions.set(key, socketIds);
-            }
-
-            socketIds.add(socket.id);
-            socket.subscriptionKeys.add(key);
-        }
+    setDistribution({ organization_id, clientId, distribution } = {}) {
+        if (!this.organizations.get(organization_id)?.clients?.has(clientId)) return;
+        this.distribution ||= new Map();
+        addDistribution(this.distribution, distribution, clientId);
     }
 
-    unsubscribe(socket, subscriptionKeys) {
-        const organization = this.organizations.get(socket.organization_id);
-        if (!organization?.subscriptions) return;
-
-        const keys = Array.isArray(subscriptionKeys)
-            ? subscriptionKeys
-            : subscriptionKeys
-                ? [subscriptionKeys]
-                : [];
-
-        for (const key of keys) {
-            const socketIds = organization.subscriptions.get(key);
-            if (!socketIds) continue;
-
-            socketIds.delete(socket.id);
-            if (!socketIds.size) organization.subscriptions.delete(key);
-            socket.subscriptionKeys?.delete(key);
-        }
-    }
-
-    removeSubscriptions(socket) {
-        if (!socket.subscriptionKeys?.size) return;
-        this.unsubscribe(socket, [...socket.subscriptionKeys]);
-        socket.subscriptionKeys.clear();
-    }
-
-    getSubscribers(data) {
+    getDistributionClients(data) {
         const clients = new Map();
         const organization = this.organizations.get(data.organization_id);
-
-        const socketIds = new Set();
-        for (const key of data.subscriptionKeys) {
-            const subscribedIds = organization?.subscriptions?.get(key);
-            if (!subscribedIds) continue;
-            for (const socketId of subscribedIds) socketIds.add(socketId);
+        const origin = (!data.serverId || data.serverId === this.serverId) && (data.workerId == null || data.workerId === this.workerId) && this.sockets.get(data.socketId);
+        const clientIds = /\.(create|update|delete)$/.test(data.method)
+            ? getDistribution(this.distribution, data.distributionKeys) : new Set();
+        if (origin && origin.organization_id === data.organization_id) clientIds.add(origin.clientId);
+        for (const clientId of clientIds) {
+            const sockets = [...organization?.clients?.get(clientId)?.values() ?? []];
+            if (origin?.organization_id === data.organization_id && origin.clientId === clientId) {
+                clients.set(clientId, [origin, ...sockets.filter(socket => socket !== origin)]);
+            } else if (sockets.length) clients.set(clientId, sockets);
         }
-
-        for (const socketId of socketIds) {
-            const socket = this.sockets.get(socketId);
-            if (!socket || socket.organization_id !== data.organization_id)
-                continue;
-
-            let sockets = clients.get(socket.clientId);
-            if (!sockets) {
-                sockets = [];
-                clients.set(socket.clientId, sockets);
-            }
-            sockets.push(socket);
-        }
-
-        const socketById = this.sockets.get(data.socketId);
-        const origin = socketById?.organization_id === data.organization_id
-            ? socketById
-            : undefined;
-        if (origin) {
-            const sockets = clients.get(origin.clientId) || [];
-            clients.set(origin.clientId, [origin, ...sockets]);
-        }
-
-        // Subscriptions select clients; any tab of that client can provide failover.
-        for (const [clientId, sockets] of clients) {
-            const fallbackSockets = organization?.clients?.get(clientId);
-            clients.set(clientId, [...new Set([
-                ...sockets,
-                ...(fallbackSockets ? fallbackSockets.values() : [])
-            ])]);
-        }
-
         return clients;
     }
 
     getClients(data) {
         try {
+            if (Array.isArray(data.distributionKeys)) return this.getDistributionClients(data);
             if (data.broadcast === "false") data.broadcast = false;
-
-            if (
-                Array.isArray(data.subscriptionKeys) &&
-                data.subscriptionKeys.length
-            ) {
-                return this.getSubscribers(data);
-            }
 
             const clients = new Map();
             const organization = this.organizations.get(data.organization_id);
@@ -528,7 +453,6 @@ export class SocketServer extends EventEmitter {
         const socketId = socket.id;
 
         const organization = this.organizations.get(organization_id);
-        this.removeSubscriptions(socket);
         if (organization && organization.clients) {
             const clientSocketsMap = organization.clients.get(clientId);
 
@@ -660,7 +584,6 @@ export class SocketServer extends EventEmitter {
 
             // 3. Terminate all client connections cleanly
             for (const socket of orgSockets) {
-                this.removeSubscriptions(socket);
                 try {
                     // Send a clean departure frame if open
                     this._safeSend(socket, { method: "disconnect", reason: "Shedding / Draining Process" });
@@ -815,6 +738,14 @@ export class SocketServer extends EventEmitter {
             data.clientId = socket.clientId;
             data.organization_id = organization_id;
             data.host = socket.host;
+            delete data.worker;
+            delete data.workerId;
+            delete data.server;
+            delete data.serverId;
+            delete data.cluster;
+            delete data.clusterId;
+            delete data.distributionKeys;
+            delete data.distribution;
             // Storage authorization may change organization_id; replies still belong to this connection.
             data.replyOrganizationId = organization_id;
 
@@ -903,21 +834,9 @@ export class SocketServer extends EventEmitter {
             } // End of Authorization Block
 
             const moduleName = data.method?.split(".")[0];
-            if (
-                ["storage", "database", "array", "index", "object"].includes(
-                    moduleName
-                ) &&
-                data.subscription
-            ) {
-                this.subscribe(socket, data.subscription);
-            }
-
             // Dispatch built-in services directly; registered application methods use server.on().
             if (data.api) {
                 await this.server.api.send(data);
-            } else if (data.method === "unsubscribe") {
-                this.unsubscribe(socket, data.subscription);
-                this._safeSend(socket, data);
             } else if (data.method === "crdt" || data.method === "cursor") {
                 this.server.send(data);
             } else if (["storage", "database", "array", "index", "object"].includes(moduleName)) {
@@ -936,9 +855,6 @@ export class SocketServer extends EventEmitter {
     async send(data) {
         data = { ...data };
         delete data.replyOrganizationId;
-        const subscriptionDelivery =
-            Array.isArray(data.subscriptionKeys) &&
-            data.subscriptionKeys.length > 0;
 
         if (data.method === 'organization.balance') {
             this.setOrganizationBalance(data, { propagate: false });
@@ -1020,7 +936,7 @@ export class SocketServer extends EventEmitter {
         if (cleanData.filter?.query) {
             cleanData.filter = { ...cleanData.filter, query: { ...cleanData.filter.query } };
         }
-        if (subscriptionDelivery) cleanData.broadcastClient = false;
+        if (Array.isArray(data.distributionKeys)) cleanData.broadcastClient = true;
 
         if (
             cleanData.filter &&

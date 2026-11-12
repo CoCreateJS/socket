@@ -132,7 +132,7 @@ export default class Sockets extends Collection {
     }
     set(id, updates) {
         update(this.get(id), updates, ['clientInfo'], [
-            'id', 'clientId', 'organization_id', 'user_id', 'subscriptionKeys',
+            'id', 'clientId', 'organization_id', 'user_id',
             'bypassDeleteCascade', 'expires', 'isAlive', 'readyState',
             'host', 'origin', 'pathname', 'socketUrl'
         ]);

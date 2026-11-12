@@ -9,7 +9,7 @@ function fixture(t) {
     const manager = new EventEmitter();
     Object.setPrototypeOf(manager, SocketServer.prototype);
     Object.assign(manager, {
-        server: {}, workerId: 1, organizations: new Map(), organizationBalances: new Map(),
+        server: { emit() {} }, workerId: 1, organizations: new Map(), organizationBalances: new Map(),
         clients: new Map(), sockets: new Map(), users: new Map()
     });
     const sockets = new Sockets(manager);
@@ -31,13 +31,12 @@ test('socket collection shares indexes, protects identity, and preserves metadat
     assert.equal(f.sockets.add(socket), socket);
     assert.equal(f.sockets.add(socket), socket);
     assert.equal(f.sockets.size, 1);
-    f.sockets.set('one', { label: 'first', id: 'wrong', clientId: 'wrong', user_id: 'wrong', subscriptionKeys: new Set(), close: null });
+    f.sockets.set('one', { label: 'first', id: 'wrong', clientId: 'wrong', user_id: 'wrong', close: null });
     f.sockets.set('one', { label: 'second' });
     assert.equal(socket.label, 'second');
     assert.equal(socket.id, 'one');
     assert.equal(socket.clientId, 'client');
     assert.equal(socket.user_id, undefined);
-    assert.equal(socket.subscriptionKeys, undefined);
     assert.equal(typeof socket.close, 'function');
     assert.equal(f.manager.sockets.get('one'), socket);
     assert.deepEqual([...f.sockets], [['one', socket]]);
@@ -47,13 +46,12 @@ test('socket collection shares indexes, protects identity, and preserves metadat
     assert.equal(f.sockets.size, 1);
 });
 
-test('nested client deletion cleans subscriptions without affecting another organization', t => {
+test('nested client deletion preserves sockets belonging to another organization', t => {
     const f = fixture(t);
     const first = f.socket('one');
     const other = f.socket('two', 'client', 'other');
     f.sockets.clients.add(first);
     const org = f.sockets.organizations.add(other);
-    f.manager.subscribe(first, 'updates');
     assert.equal(org, f.sockets.organizations.get('other'));
     const clients = f.sockets.organizations.get('org').clients;
     assert.throws(() => clients.add(f.socket('wrong', 'client', 'other')), /does not belong/);
@@ -62,7 +60,6 @@ test('nested client deletion cleans subscriptions without affecting another orga
     assert.equal(f.sockets.get('one'), undefined);
     assert.equal(f.sockets.get('two'), other);
     assert.equal(f.sockets.clients.get('client').size, 1);
-    assert.equal(f.sockets.organizations.get('org').subscriptions.size, 0);
     t.mock.timers.tick(60000);
     assert.equal(f.sockets.organizations.has('org'), false);
     assert.equal(f.sockets.organizations.has('other'), true);

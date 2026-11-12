@@ -9,10 +9,15 @@ function fixture() {
     const attempts = [];
     const usage = [];
     const clients = new Map();
-    const subscriptions = new Map([['updates', new Set()]]);
-    manager.organizations = new Map([['org', { clients, subscriptions }]]);
+    manager.distribution = new Map();
+    manager.organizations = new Map([['org', { clients }]]);
     manager.sockets = new Map();
-    manager.server = { usage: { send: (data) => usage.push(data) }, send() {} };
+    manager.server = {
+        usage: { send: data => usage.push(data) }, send() {},
+        emit: (...args) => manager.emit(...args),
+        api: { send: data => manager.emit('api', data) },
+        crud: { send: data => manager.emit(data.method, data) }
+    };
     function socket(id, clientId = 'client', failure) {
         const socket = {
             id, clientId, organization_id: 'org', readyState: 1,
@@ -33,7 +38,7 @@ function fixture() {
         await manager.send({ method: 'object.read', organization_id: 'org', ...extra });
         return notification.sent;
     }
-    return { manager, attempts, usage, clients, subscriptions, socket, send };
+    return { manager, attempts, usage, clients, socket, send };
 }
 
 test('requesting socket wins over older tabs, with one write per client', async () => {
@@ -60,24 +65,23 @@ for (const failure of ['closed', 'callback', 'throw']) {
     });
 }
 
-test('subscription delivery includes the origin and uses other tabs as fallback', async () => {
+test('distribution delivery includes the origin and uses other tabs as fallback', async () => {
     const f = fixture();
     f.socket('fallback');
     const origin = f.socket('origin', 'client', 'callback');
-    f.socket('subscriber', 'other-client');
+    f.socket('registered', 'other-client');
     f.socket('unrelated', 'unrelated-client');
-    f.subscriptions.get('updates').add('subscriber');
-    assert.deepEqual(await f.send({ socketId: origin.id, subscriptionKeys: ['updates'] }), ['other-client', 'client']);
-    assert.deepEqual(f.attempts, ['subscriber', 'origin', 'fallback']);
+    f.manager.setDistribution({ organization_id: 'org', clientId: 'other-client', distribution: ['updates'] });
+    assert.deepEqual(await f.send({ method: 'object.update', socketId: origin.id, distributionKeys: ['updates'] }), ['other-client', 'client']);
+    assert.deepEqual(f.attempts, ['registered', 'origin', 'fallback']);
 });
 
-test('subscription ordering cannot select an older tab before the origin', async () => {
+test('distribution ordering cannot select an older tab before the origin', async () => {
     const f = fixture();
     f.socket('older');
     const origin = f.socket('origin');
-    f.subscriptions.get('updates').add('older');
-    f.subscriptions.get('updates').add('origin');
-    await f.send({ socketId: origin.id, subscriptionKeys: ['updates'] });
+    f.manager.setDistribution({ organization_id: 'org', clientId: 'client', distribution: ['updates'] });
+    await f.send({ method: 'object.update', socketId: origin.id, distributionKeys: ['updates'] });
     assert.deepEqual(f.attempts, ['origin']);
 });
 
@@ -110,18 +114,18 @@ test('socket payload data is preserved without participating in recipient select
     assert.deepEqual(delivered.socket, socket);
 });
 
-for (const lookup of ['no matches', 'no subscriptions', 'no organization', 'unregistered broadcast']) {
+for (const lookup of ['no matches', 'no distribution', 'no organization', 'unregistered broadcast']) {
     test(`requester remains a recipient with ${lookup}`, async () => {
         const f = fixture();
         const origin = f.socket('origin');
-        const data = { socketId: origin.id, subscriptionKeys: ['missing'] };
-        if (lookup === 'no subscriptions') {
-            delete f.manager.organizations.get('org').subscriptions;
+        const data = { socketId: origin.id, distributionKeys: ['missing'] };
+        if (lookup === 'no distribution') {
+            delete f.manager.distribution;
         } else if (lookup === 'no organization') {
             f.manager.organizations.clear();
         } else if (lookup === 'unregistered broadcast') {
             f.clients.clear();
-            delete data.subscriptionKeys;
+            delete data.distributionKeys;
             data.broadcast = true;
         }
         assert.deepEqual(await f.send(data), ['client']);
