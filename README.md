@@ -75,7 +75,7 @@ The socket server sends to one connected socket for each selected `clientId`. If
 
 ## Browser-context delivery
 
-The client stores the complete relay payload in the `localSocketMessages` array of the shared `system` IndexedDB database. The `messageQueue` array uses the same internal database. Records retain `organization_id` for organization-scoped filtering, while application databases remain free of socket transport state. The client writes only the record ID and organization ID to the `localSocketMessage` local-storage key, allowing other contexts to retrieve the message without being constrained by local-storage value limits.
+Outgoing messages waiting for a socket connection are kept in the client's in-memory `messageQueue` Map and are sent after the server confirms the connection. They are not persisted, so a page reload discards them. Incoming messages relayed to other browser contexts are stored separately in the `localSocketMessages` array of the shared `system` IndexedDB database. The client writes the relay record ID and organization ID to the `localSocketMessage` local-storage key, allowing other contexts to retrieve the payload without being constrained by local-storage value limits.
 
 The native `storage` event fires in the other same-origin contexts, not in the context that performed the write. The receiving contexts read the IndexedDB record and fire their local listeners. Each new relay also removes records older than five seconds.
 

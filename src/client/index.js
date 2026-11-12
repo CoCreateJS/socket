@@ -333,7 +333,7 @@ const CoCreateSocketClient = {
                         socket.connected = true;
                         socket.__disconnectNotified = false;
                         delete data.currentReconnectDelay;
-                        self.checkMessageQueue(data);
+                        self.checkMessageQueue();
                     } else if (message.method === "disconnect") {
                         socket.connected = false;
                         self.connected = false;
@@ -366,40 +366,6 @@ const CoCreateSocketClient = {
                                     ObjectId(message._id).timestamp
                                 ) {
                                     config.set(socket.url, message._id);
-                                }
-                            }
-
-                            let Data = {
-                                method: "object.delete",
-                                database: "system",
-                                array: "messageQueue",
-                                filter: {
-                                    query: {
-                                        "updated.on": {
-                                            $gt: message.timestamp
-                                        },
-                                        status: "queued"
-                                    }
-                                }
-                            };
-
-                            let type = message.method.split(".")[0];
-                            if (Array.isArray(message[type])) {
-                                for (let item of message[type]) {
-                                    if (type == "object") {
-                                        Data.filter.query["data._id"] =
-                                            item._id;
-                                    } else if (
-                                        [
-                                            "database",
-                                            "array",
-                                            "index"
-                                        ].includes(type)
-                                    ) {
-                                        Data.filter.query[
-                                            "data.name"
-                                        ] = item.name;
-                                    }
                                 }
                             }
                         }
@@ -463,33 +429,12 @@ const CoCreateSocketClient = {
         }
     },
 
-    checkMessageQueue(config) {
+    checkMessageQueue() {
         if (this.messageQueue.size > 0) {
             for (let [uuid, data] of this.messageQueue) {
                 this.send(data);
                 this.messageQueue.delete(uuid);
             }
-        }
-
-        const storage = getIndexeddb();
-        if (isBrowser && storage) {
-            storage
-                .send({
-                    method: "object.delete",
-                    database: "system",
-                    array: "messageQueue",
-                    filter: {
-                        query: { status: "queued" }
-                    },
-                    organization_id: config.organization_id
-                })
-                .then((data) => {
-                    if (data) {
-                        for (let i = 0; i < data.object.length; i++) {
-                            this.send(data.object[i].data);
-                        }
-                    }
-                });
         }
     },
 
@@ -537,27 +482,7 @@ const CoCreateSocketClient = {
                     data.status = "queued";
                 }
 
-                if (isBrowser) {
-                    if (data.status !== "sent") data.status = "queued";
-
-                    const storage = getIndexeddb();
-                    if (storage && data.status === "queued") {
-                        storage.send({
-                            method: "object.update",
-                            database: "system",
-                            array: "messageQueue",
-                            upsert: true,
-                            object: {
-                                _id: UUID,
-                                data,
-                                status: "queued"
-                            },
-                            organization_id: data.organization_id
-                        });
-                    } else if (data.status === "queued") {
-                        this.messageQueue.set(UUID, data);
-                    }
-                } else if (data.status === "queued") {
+                if (data.status === "queued") {
                     this.messageQueue.set(UUID, data);
                 }
             }
