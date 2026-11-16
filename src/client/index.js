@@ -64,6 +64,7 @@ const socketsById = new Map();
 const delay = 1000 + Math.floor(Math.random() * 3000);
 
 let organizationPromise = null;
+let clientInitialization = Promise.resolve();
 
 async function getOrganization() {
     let organization_id = config.get("organization_id");
@@ -181,7 +182,7 @@ const CoCreateSocketClient = {
     },
 
     async init() {
-        this.clientId = config.get("clientId");
+        this.clientId = await config.get("clientId");
         this.clientInfo = await getClientInfo();
         if (!this.clientId || this.clientId === "undefined") {
             this.clientId = ObjectId().toString()
@@ -237,6 +238,8 @@ const CoCreateSocketClient = {
 
     async create(data = {}) {
         const self = this;
+
+        await clientInitialization;
 
         if (this.organization === "canceled") return;
 
@@ -691,7 +694,7 @@ const CoCreateSocketClient = {
     }
 };
 
-CoCreateSocketClient.init();
+clientInitialization = CoCreateSocketClient.init();
 
 if (isBrowser) {
     window.onstorage = async (e) => {

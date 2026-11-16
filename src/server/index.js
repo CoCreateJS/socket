@@ -68,12 +68,11 @@ export class SocketServer extends EventEmitter {
         this.wss.on("headers", this._handleHeaders.bind(this));
         this.wss.on("error", this._handleWssError.bind(this));
 
-        if (server.https) {
-            server.https.on("upgrade", this._upgradeWss.bind(this));
-        }
-        if (server.http) {
-            server.http.on("upgrade", this._upgradeWs.bind(this));
-        }
+        this.upgradeWss = this._upgradeWss.bind(this);
+        this.upgradeWs = this._upgradeWs.bind(this);
+        this.attachedHttp = null;
+        this.attachedHttps = null;
+        this.attach();
 
         // Hook up process-level events to allow other modules (Telemetry, CoCreateServer) to invoke evictions
         process.on('socket.destroyAll', () => {
@@ -112,6 +111,18 @@ export class SocketServer extends EventEmitter {
     close() {
         clearInterval(this.heartbeatInterval);
         this.wss.close();
+    }
+
+    attach() {
+        if (this.server.https && this.attachedHttps !== this.server.https) {
+            this.server.https.on("upgrade", this.upgradeWss);
+            this.attachedHttps = this.server.https;
+        }
+        if (this.server.http && this.attachedHttp !== this.server.http) {
+            this.server.http.on("upgrade", this.upgradeWs);
+            this.attachedHttp = this.server.http;
+        }
+        return this;
     }
 
     _handleHeaders(headers, request) {
@@ -193,7 +204,7 @@ export class SocketServer extends EventEmitter {
 
                 socket.organization_id = organization_id;
                 socket.id = options.socketId;
-                socket.clientId = options.clientId;
+                socket.clientId = options.clientId || socket.id;
                 socket.clientInfo = options.clientInfo;
                 socket.pathname = request.url;
                 socket.origin = request.headers.origin;
@@ -367,7 +378,9 @@ export class SocketServer extends EventEmitter {
     getDistributionClients(data) {
         const clients = new Map();
         const organization = this.organizations.get(data.organization_id);
-        const origin = (!data.serverId || data.serverId === this.serverId) && (data.workerId == null || data.workerId === this.workerId) && this.sockets.get(data.socketId);
+        const origin = (!data.serverId || data.serverId === this.serverId) &&
+            (data.workerId == null || this.workerId == null || String(data.workerId) === String(this.workerId)) &&
+            this.sockets.get(data.socketId);
         const clientIds = /\.(create|update|delete)$/.test(data.method)
             ? getDistribution(this.distribution, data.distributionKeys) : new Set();
         if (origin && origin.organization_id === data.organization_id) clientIds.add(origin.clientId);
