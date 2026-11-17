@@ -25,6 +25,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { URL } from 'node:url';
 import Config from '@cocreate/config';
 import { addDistribution, getDistribution } from '@cocreate/utils/distribution';
+import { BinaryReceiver, deserialize, sendBinary } from '../binary.js';
 
 /**
  *
@@ -265,6 +266,7 @@ export class SocketServer extends EventEmitter {
 
     onWebSocket(socket) {
         const self = this;
+        socket.binaryReceiver = new BinaryReceiver();
 
         socket.isAlive = true;
         socket.on("pong", () => {
@@ -273,11 +275,12 @@ export class SocketServer extends EventEmitter {
 
         this.add(socket);
 
-        socket.on("message", async (message) => {
-            self.onMessage(socket, message);
+        socket.on("message", async (message, isBinary) => {
+            self.onMessage(socket, message, isBinary);
         });
 
         socket.on("close", () => {
+            socket.binaryReceiver.clear();
             // Guard: If we are intentionally tearing down, bypass redundant delete cycles
             if (socket.bypassDeleteCascade) {
                 socket.removeAllListeners();
@@ -287,6 +290,7 @@ export class SocketServer extends EventEmitter {
         });
 
         socket.on("error", () => {
+            socket.binaryReceiver.clear();
             if (socket.bypassDeleteCascade) {
                 socket.removeAllListeners();
                 return;
@@ -713,19 +717,26 @@ export class SocketServer extends EventEmitter {
         this.destroyOrganizations(allOrgIds, { reason: 'shutdown' });
     }
 
-    async onMessage(socket, message) {
+    async onMessage(socket, message, isBinary = true) {
         try {
+            if (!isBinary) return this._safeSend(socket, { error: "Socket payload must be binary" });
+            const complete = socket.binaryReceiver.push(message);
+            if (!complete) return;
+
             this.server.usage.send({
                 organization_id: socket.organization_id,
                 type: "ingress",
-                payload: message
+                payload: complete,
+                bytes: complete.byteLength
             });
 
             let data;
             try {
-                data = JSON.parse(message);
+                data = deserialize(complete);
             } catch (err) {
-                return this._safeSend(socket, { error: "Invalid JSON payload" });
+                return this._safeSend(socket, { error: "Invalid binary payload" });
+            } finally {
+                socket.binaryReceiver.release(complete);
             }
 
             if (data.method || data.endpoint) {
@@ -960,13 +971,10 @@ export class SocketServer extends EventEmitter {
             delete cleanData.filter.query._id;
         }
 
-        const defaultPayloadStr = JSON.stringify(cleanData);
-
         for (const [clientId, sockets] of clients) {
             const sessionSocket = sockets[0];
             if (!sessionSocket) continue;
 
-            let payloadStr = defaultPayloadStr;
             let finalDataObj = cleanData;
 
             if (this.authorize) {
@@ -991,18 +999,19 @@ export class SocketServer extends EventEmitter {
                         delete finalDataObj.filter.query._id;
                     }
 
-                    payloadStr = JSON.stringify(finalDataObj);
                 }
             }
 
             for (const recipientSocket of sockets) {
-                if (!await this._safeSend(recipientSocket, payloadStr)) continue;
+                const bytes = await this._safeSend(recipientSocket, finalDataObj);
+                if (!bytes) continue;
 
                 sent.push(clientId);
                 this.server.usage.send({
                     organization_id: recipientSocket.organization_id,
                     type: "egress",
-                    payload: payloadStr
+                    payload: finalDataObj,
+                    bytes
                 });
                 break;
             }
@@ -1015,10 +1024,7 @@ export class SocketServer extends EventEmitter {
     async _safeSend(socket, payload) {
         try {
             if (socket && socket.readyState === WebSocket.OPEN) {
-                const message = typeof payload === "string" ? payload : JSON.stringify(payload);
-                return await new Promise((resolve) => {
-                    socket.send(message, (error) => resolve(!error));
-                });
+                return await sendBinary(socket, payload);
             }
         } catch (err) {
             console.error("[@cocreate/socket] Error safely writing to socket:", err);

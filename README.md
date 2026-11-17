@@ -1,6 +1,6 @@
 # CoCreate Socket
 
-Client and server WebSocket interfaces for CoCreate. Send JSON envelopes from browsers or Node.js, route them through application handlers and the server mesh, and relay responses across browser contexts.
+Client and server WebSocket interfaces for CoCreate. Send application envelopes from browsers or Node.js, route them through application handlers and the server mesh, and relay responses across browser contexts.
 
 ---
 
@@ -18,6 +18,7 @@ For complete API references, protocol event schemas, configuration guides, and e
 - [Connection](#connection)
 - [Socket collection](#socket-collection)
 - [Message routing](#message-routing)
+- [Binary transport](#binary-transport)
 - [Client and socket selection](#client-and-socket-selection)
 - [Authorization](#authorization)
 - [Server mesh](#server-mesh)
@@ -61,6 +62,12 @@ const response = await SocketClient.send({
 ```
 
 The socket client automatically supplies connection metadata including `clientId`, `frameId`, `socketId`, `organization_id`, `uuid`, and `timeStamp`.
+
+## Binary transport
+
+Socket application payloads use a shared CBOR binary format in both directions. Payloads up to the configured chunk size travel in one binary WebSocket message. Larger payloads are framed into binary chunks and reassembled before application processing.
+
+Set `socket.chunkSize` through CoCreate's existing configuration system in KiB. It defaults to `64` and accepts integer values from `16` through `1024`.
 
 ## Client routing controls
 

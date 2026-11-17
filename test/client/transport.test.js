@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocketServer } from 'ws';
 import { SocketClient } from '../../src/client/index.js';
+import { BinaryReceiver, deserialize, sendBinary } from '../../src/binary.js';
 
 test('client indexes the same socket by URL and ID and deletes both references', () => {
     const socket = {
@@ -48,17 +49,21 @@ for (const denied of [false, true]) {
             let ready = false;
             const timer = setTimeout(() => {
                 ready = true;
-                socket.send(JSON.stringify({ method: 'connect', connectedKey: `/${organization_id}` }));
+                sendBinary(socket, { method: 'connect', connectedKey: `/${organization_id}` });
             }, 30);
             socket.on('close', () => clearTimeout(timer));
-            socket.on('message', message => {
+            const receiver = new BinaryReceiver();
+            socket.on('message', (message, isBinary) => {
+                assert.equal(isBinary, true);
                 if (!ready) earlyRequests++;
-                const request = JSON.parse(message);
+                const complete = receiver.push(message);
+                if (!complete) return;
+                const request = deserialize(complete);
                 requests.push(request);
-                socket.send(JSON.stringify({
+                sendBinary(socket, {
                     ...request, broadcastSender: false,
                     ...(denied ? { error: 'read denied' } : { object: [{ _id: 'local-test' }] })
-                }));
+                });
             });
         });
         const pending = SocketClient.send({

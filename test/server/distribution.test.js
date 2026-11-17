@@ -7,6 +7,7 @@ import test from 'node:test';
 import Config from '@cocreate/config';
 import { initializeServerDB } from '../../../db/src/server.js';
 import { SocketServer } from '../../src/server/index.js';
+import { BinaryReceiver, deserialize } from '../../src/binary.js';
 
 const organization_id = '000000000000000000000001';
 const scope = { organization_id, storage: 'production', database: 'app', array: 'items' };
@@ -25,8 +26,13 @@ async function fixture(t) {
     const clients = new Map();
     socket.organizations.set(organization_id, { clients });
     function client(id) {
+        const receiver = new BinaryReceiver();
         const connection = { id: `${id}-socket`, clientId: id, organization_id, host: 'localhost', readyState: 1,
-            send(payload, callback) { messages.get(id).push(JSON.parse(payload)); callback?.(); } };
+            send(payload, callback) {
+                const complete = receiver.push(payload);
+                if (complete) messages.get(id).push(deserialize(complete));
+                callback?.();
+            } };
         messages.set(id, []);
         clients.set(id, new Map([[connection.id, connection]]));
         socket.sockets.set(connection.id, connection);
@@ -68,7 +74,7 @@ test('DB sets worker and socket distribution from ordinary CRUD; only matching c
     assert.equal(f.messages.get('c').length, 0);
     assert.equal(f.messages.get('unused').length, 0);
     assert.equal(f.messages.get('b')[0].method, 'object.update');
-    assert.equal(f.messages.get('b')[0].object[0].$set.value, 3);
+    assert.equal(f.messages.get('b')[0].object[0].value, 3);
     assert.ok([...f.messages.values()].flat().every(message => message.method !== 'db.distribution.set'));
 })
 

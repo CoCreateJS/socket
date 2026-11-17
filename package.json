@@ -38,6 +38,7 @@
     "@cocreate/config": "^2.0.1",
     "@cocreate/utils": "^2.0.2",
     "@cocreate/organizations": "^3.0.1",
+    "cbor-x": "^1.6.9",
     "ws": "^8.21.1"
   },
   "exports": {
@@ -46,7 +47,8 @@
       "default": "./src/index.js"
     },
     "./server": "./src/server/index.js",
-    "./client": "./src/client/index.js"
+    "./client": "./src/client/index.js",
+    "./binary": "./src/binary.js"
   },
   "browser": "./src/client/index.js"
 }

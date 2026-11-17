@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { SocketServer } from '../../src/server/index.js';
+import { BinaryReceiver, deserialize } from '../../src/binary.js';
 
 function fixture() {
     const manager = new EventEmitter();
@@ -19,12 +20,15 @@ function fixture() {
         crud: { send: data => manager.emit(data.method, data) }
     };
     function socket(id, clientId = 'client', failure) {
+        const receiver = new BinaryReceiver();
         const socket = {
-            id, clientId, organization_id: 'org', readyState: 1,
+            id, clientId, organization_id: 'org', readyState: 1, binaryReceiver: receiver,
             send(payload, callback) {
                 attempts.push(id);
                 if (failure === 'throw') throw new Error('write failed');
-                setImmediate(() => callback(failure ? new Error('write failed') : undefined));
+                const complete = receiver.push(payload);
+                if (complete) socket.lastMessage = deserialize(complete);
+                setImmediate(() => callback?.(failure ? new Error('write failed') : undefined));
             }
         };
         if (!clients.has(clientId)) clients.set(clientId, new Map());
@@ -107,7 +111,7 @@ test('socket payload data is preserved without participating in recipient select
     f.socket('other', 'other-client');
     let delivered;
     const write = origin.send;
-    origin.send = (payload, callback) => { delivered = JSON.parse(payload); write(payload, callback); };
+    origin.send = (payload, callback) => { write(payload, callback); delivered = origin.lastMessage; };
     const socket = { id: 'other', organization_id: 'another-org', purpose: 'application data' };
     await f.send({ socketId: 'origin', socket });
     assert.deepEqual(f.attempts, ['origin']);
@@ -139,7 +143,9 @@ test('socket send is local-only, resolves undefined, and preserves the routing e
     Object.assign(f.manager.server, { id: 'node', workerId: 1, cluster_id: 'local-cluster' });
     const write = socket.send;
     socket.send = (payload, callback) => {
-        const message = JSON.parse(payload);
+        const complete = socket.binaryReceiver?.push(payload);
+        const message = complete && deserialize(complete);
+        if (!message) return write(payload, callback);
         for (const field of ['serverId', 'workerId', 'clusterId']) assert.equal(field in message, false);
         write(payload, callback);
     };
