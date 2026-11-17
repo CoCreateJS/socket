@@ -157,7 +157,7 @@ Incoming envelopes are dispatched as follows:
 
 For each selected client, the server attempts its connected sockets in order and stops after the first successful write. The originating socket is tried first for its client, including distribution delivery. Distribution references select clients, with other sockets for those clients available as fallbacks. A write succeeds only when the WebSocket send callback reports no error. This provides socket failover without sending duplicate copies to every socket belonging to the same browser client.
 
-`broadcastClient` and `broadcastSender` are forwarded to socket-client. Browser-context relaying and originating-frame listener suppression are handled on the client; they do not change socket selection on the server.
+`broadcastClient` and `broadcastSender` are forwarded to SocketClient. Browser-context relaying and originating-frame listener suppression are handled by the client implementation in this package; they do not change socket selection on the server.
 
 ## Authorization
 
@@ -185,7 +185,7 @@ component responses and cross-worker or peer delivery.
 
 ## Heartbeat and disconnection
 
-The server sends WebSocket ping frames every 30 seconds. Connections that do not answer with a pong before the next heartbeat are terminated and removed from the organization, client, socket, and user maps. Reconnection and queued client messages are managed by socket-client rather than buffered by the server.
+The server sends WebSocket ping frames every 30 seconds. Connections that do not answer with a pong before the next heartbeat are terminated and removed from the organization, client, socket, and user maps. Reconnection and queued client messages are managed by SocketClient rather than buffered by the server.
 
 ---
 
