@@ -22,7 +22,7 @@
  * For details, visit <https://CoCreateJS.com/licenses/> or contact us at sales@CoCreateJS.com.
  */
 
-import { ObjectId, uuid, getClientInfo } from "@cocreate/utils";
+import { ObjectId, uid, uuid, getClientInfo } from "@cocreate/utils";
 import config from "@cocreate/config";
 import { BinaryReceiver, deserialize, sendBinary } from "../binary.js";
 
@@ -104,7 +104,7 @@ const CoCreateSocketClient = {
  * @environment client
  * @environment server
  */
-    frameId: uuid(8),
+    frameId: uid(8),
     /**
      *
  * @public
@@ -257,7 +257,7 @@ const CoCreateSocketClient = {
                     token = config.get("token");
                 }
 
-                const socketId = uuid(8);
+                const socketId = uid(8);
 
                 const options = {
                     socketId,
