@@ -65,7 +65,11 @@ The socket client automatically supplies connection metadata including `clientId
 
 ## Binary transport
 
-Socket application payloads use a shared CBOR binary format in both directions. Payloads up to the configured chunk size travel in one binary WebSocket message. Larger payloads are framed into binary chunks and reassembled before application processing.
+Socket encodes payloads with CoSON (`@cocreate/coson`). The CoSON frame contains UTF-8 JSON structure and raw binary sections; it remains a `Uint8Array` on the wire. Unchunked messages are sent as the CoSON frame directly. Messages above the configured limit are split into byte chunks, then reassembled before CoSON decoding. Socket does not convert frames to text or Base64.
+
+The browser client encodes and decodes with `{ operators: true }`, so supported native JavaScript types are reconstructed for client code. Socket Server explicitly decodes with `{ operators: false }`: it preserves non-binary operators and exposes raw binary sections through the root `$binary` container for application or AST processing. To forward an already prepared representation, pass `{ operators: false }` to `SocketServer.send(data, options)`; native server-created messages use the default `{ operators: true }`. Prepared binary envelopes require an ordinary object root with a non-empty root `$binary` array, as defined by CoSON.
+
+Operator execution, authorization, workflows, CRUD and selective reconstruction belong to application services or the AST engine. Socket owns connections, binary transport, chunking, reassembly and delivery.
 
 Set `socket.chunkSize` through CoCreate's existing configuration system in KiB. It defaults to `64` and accepts integer values from `16` through `1024`.
 

@@ -145,5 +145,5 @@ export default class Sockets extends Collection {
             if (this.get(id) === socket) this.manager.delete(socket);
         }
     }
-    send(data) { return this.manager.send(data); }
+    send(data, options) { return this.manager.send(data, options); }
 }

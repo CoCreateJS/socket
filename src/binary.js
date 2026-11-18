@@ -1,4 +1,4 @@
-import { decode, encode } from "cbor-x";
+import { decode, encode } from "@cocreate/coson";
 import config from "@cocreate/config";
 
 const MAGIC = new Uint8Array([0x43, 0x43, 0x53, 0x31]); // CCS1
@@ -11,12 +11,12 @@ const MAX_CONCURRENT_TRANSFERS = 16;
 const TRANSFER_TIMEOUT = 60_000;
 let nextTransferId = 1;
 
-export function serialize(value) {
-    return encode(value);
+export function serialize(value, options = { operators: true }) {
+    return encode(value, options);
 }
 
-export function deserialize(value) {
-    return decode(toUint8Array(value));
+export function deserialize(value, options = { operators: true }) {
+    return decode(toUint8Array(value), options);
 }
 
 export function getChunkSize() {
@@ -58,7 +58,7 @@ export function* createFrames(payload, chunkSize = getChunkSize()) {
         throw new RangeError(`Socket transfer exceeds ${MAX_TRANSFER_SIZE} bytes`);
     }
     if (payload.byteLength <= chunkSize) {
-        yield frame(payload, SINGLE);
+        yield payload;
         return;
     }
 
@@ -75,8 +75,8 @@ export function* createFrames(payload, chunkSize = getChunkSize()) {
     }
 }
 
-export async function sendBinary(socket, value) {
-    const bytes = serialize(value);
+export async function sendBinary(socket, value, options = { operators: true }) {
+    const bytes = serialize(value, options);
     const chunkSize = getChunkSize();
     const bufferedLimit = Math.max(chunkSize * 2, 128 * 1024);
     let transmittedBytes = 0;
@@ -117,8 +117,16 @@ export class BinaryReceiver {
 
     push(value) {
         const bytes = toUint8Array(value);
+        // Unchunked CoSON frames travel directly. CCS1 is only the socket's
+        // chunk transport envelope and is removed after reassembly.
         if (bytes.byteLength < HEADER_SIZE || !MAGIC.every((byte, i) => bytes[i] === byte)) {
-            throw new TypeError("Invalid CoCreate socket binary frame");
+            if (!bytes.byteLength || bytes.byteLength > MAX_TRANSFER_SIZE ||
+                this.bufferedBytes + bytes.byteLength > MAX_BUFFERED_SIZE) {
+                throw new RangeError("Invalid or oversized CoSON socket frame");
+            }
+            this.bufferedBytes += bytes.byteLength;
+            this.leases.set(bytes, bytes.byteLength);
+            return bytes;
         }
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
         const type = bytes[4];

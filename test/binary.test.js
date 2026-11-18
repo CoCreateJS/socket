@@ -31,7 +31,7 @@ test('binary serialization preserves nested application values and binary types'
 test('socket payloads fitting the configured limit use one binary frame', () => {
     const frames = [...createFrames(serialize({ method: 'object.read' }), 16 * 1024)];
     assert.equal(frames.length, 1);
-    assert.equal(frames[0][4], 0);
+    assert.equal(frames[0][0], 0x53); // CoSON frame is sent without a socket wrapper.
 });
 
 test('socket chunk size uses the shared config in KiB and rejects invalid values', t => {
@@ -76,16 +76,49 @@ test('socket receiver rejects malformed and incomplete chunk sequences', () => {
     receiver.clear();
 });
 
-test('Socket Server reassembles and deserializes incoming application payloads', async () => {
+test('Socket Server reassembles and preserves operators and binary sections', async () => {
     const manager = Object.create(SocketServer.prototype);
     manager.server = { usage: { send() {} } };
     const received = [];
     manager.Message = async (_socket, data) => received.push(data);
     const socket = { binaryReceiver: new BinaryReceiver(), organization_id: 'org' };
-    const value = { method: 'object.create', object: { value: 'x'.repeat(20_000) } };
-    for (const frame of createFrames(serialize(value), 1024)) {
+    const value = {
+        method: 'object.create',
+        created: new Date(1234),
+        object: { value: '雪🙂'.repeat(20_000) },
+        image: new Uint8Array([0, 127, 255]),
+        preview: new Uint16Array([256, 65535]),
+        large: Uint8Array.from({ length: 128 * 1024 }, (_, index) => index & 255)
+    };
+    for (const frame of createFrames(serialize(value, { operators: true }), 1024)) {
         await manager.onMessage(socket, frame, true);
     }
-    assert.deepEqual(received, [value]);
+    assert.equal(received.length, 1);
+    assert.deepEqual(received[0].created, { $date: 1234 });
+    assert.equal(received[0].object.value, value.object.value);
+    assert.equal(received[0].image, '$binary[0]');
+    assert.deepEqual(received[0].$binary[0].$Uint8Array, value.image);
+    assert.equal(received[0].preview, '$binary[1]');
+    assert.deepEqual(received[0].$binary[1].$Uint16Array, new Uint8Array(value.preview.buffer));
+    assert.equal(received[0].large, '$binary[2]');
+    assert.deepEqual(received[0].$binary[2].$Uint8Array, value.large);
+    let forwarded = received[0];
+    for (let i = 0; i < 2; i++) {
+        forwarded = deserialize(serialize(forwarded, { operators: false }), { operators: false });
+    }
+    assert.deepEqual(forwarded, received[0]);
     socket.binaryReceiver.clear();
+});
+
+test('CoSON native mode reconstructs supported extended types', () => {
+    const value = { when: new Date(1234), bytes: new Uint8Array([1, 2]), unicode: 'Καλημέρα 🌍' };
+    const result = deserialize(serialize(value, { operators: true }), { operators: true });
+    assert.equal(result.when.getTime(), 1234);
+    assert.deepEqual(result.bytes, value.bytes);
+    assert.equal(result.unicode, value.unicode);
+});
+
+test('prepared binary envelopes reject unsupported root arrays', () => {
+    const frame = serialize([new Uint8Array([1])], { operators: true });
+    assert.throws(() => deserialize(frame, { operators: false }), /root|binary/i);
 });

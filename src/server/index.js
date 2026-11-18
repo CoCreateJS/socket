@@ -732,7 +732,7 @@ export class SocketServer extends EventEmitter {
 
             let data;
             try {
-                data = deserialize(complete);
+                data = deserialize(complete, { operators: false });
             } catch (err) {
                 return this._safeSend(socket, { error: "Invalid binary payload" });
             } finally {
@@ -876,7 +876,7 @@ export class SocketServer extends EventEmitter {
         }
     }
 
-    async send(data) {
+    async send(data, options = { operators: true }) {
         data = { ...data };
         delete data.replyOrganizationId;
 
@@ -1003,7 +1003,7 @@ export class SocketServer extends EventEmitter {
             }
 
             for (const recipientSocket of sockets) {
-                const bytes = await this._safeSend(recipientSocket, finalDataObj);
+                const bytes = await this._safeSend(recipientSocket, finalDataObj, options);
                 if (!bytes) continue;
 
                 sent.push(clientId);
@@ -1021,10 +1021,10 @@ export class SocketServer extends EventEmitter {
     }
 
     // Helper to send payloads safely on valid connections without throwing frame failures
-    async _safeSend(socket, payload) {
+    async _safeSend(socket, payload, options = { operators: true }) {
         try {
             if (socket && socket.readyState === WebSocket.OPEN) {
-                return await sendBinary(socket, payload);
+                return await sendBinary(socket, payload, options);
             }
         } catch (err) {
             console.error("[@cocreate/socket] Error safely writing to socket:", err);

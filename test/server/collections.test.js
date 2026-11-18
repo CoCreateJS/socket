@@ -86,8 +86,13 @@ test('send delegates to the existing delivery implementation', t => {
     const f = fixture(t);
     const payload = { organization_id: 'org', method: 'object.read' };
     const result = Promise.resolve('sent');
-    t.mock.method(f.manager, 'send', data => { assert.equal(data, payload); return result; });
-    assert.equal(f.sockets.send(payload), result);
+    const options = { operators: false };
+    t.mock.method(f.manager, 'send', (data, passedOptions) => {
+        assert.equal(data, payload);
+        assert.equal(passedOptions, options);
+        return result;
+    });
+    assert.equal(f.sockets.send(payload, options), result);
 });
 
 test('natural close and reconnect retain one presence transition through the grace period', t => {

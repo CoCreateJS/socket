@@ -336,7 +336,7 @@ const CoCreateSocketClient = {
                     const complete = socket.binaryReceiver.push(message.data);
                     if (!complete) return;
                     try {
-                        message = deserialize(complete);
+                        message = deserialize(complete, { operators: true });
                     } finally {
                         socket.binaryReceiver.release(complete);
                     }
@@ -491,7 +491,7 @@ const CoCreateSocketClient = {
                     delete data.status;
 
                     try {
-                        await sendBinary(socket, data);
+                        await sendBinary(socket, data, { operators: true });
                     } catch (error) {
                         reject(error);
                         return;
